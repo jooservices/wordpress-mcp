@@ -1,0 +1,6 @@
+# WordPress MCP reverse proxy example
+# Replace mcp.example.com with your domain.
+
+mcp.example.com {
+    reverse_proxy mcp:3000
+}

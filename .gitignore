@@ -1,0 +1,12 @@
+.env
+.env.prod
+.local/
+node_modules/
+vendor/
+build/
+coverage/
+*.log
+.DS_Store
+pnpm-lock.yaml
+packages/mcp-server/dist/
+**/.phpunit.result.cache

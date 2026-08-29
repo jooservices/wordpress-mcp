@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master, develop]
+
+jobs:
+  php:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build PHP image
+        run: docker compose build php
+      - name: Install and CI
+        run: docker compose run --rm php composer install && docker compose run --rm php composer ci
+
+  mcp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: MCP CI
+        working-directory: packages/mcp-server
+        run: |
+          docker run --rm -v "$PWD:/app" -w /app node:22-bookworm-slim sh -c "npm install && npm run ci"

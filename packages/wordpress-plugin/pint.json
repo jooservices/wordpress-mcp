@@ -1,0 +1,6 @@
+{
+    "preset": "per",
+    "rules": {
+        "single_line_empty_body": false
+    }
+}

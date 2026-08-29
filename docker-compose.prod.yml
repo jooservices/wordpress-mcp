@@ -1,0 +1,78 @@
+# Production: WordPress MCP server (+ optional HTTPS / tunnel)
+#
+# Quick start:
+#   cp .env.prod.example .env.prod
+#   # edit WORDPRESS_URL + WORDPRESS_CONNECTION_TOKEN (single site)
+#   # or WORDPRESS_SITES JSON array (multiple sites), plus MCP_PUBLIC_URL
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# With automatic HTTPS (set MCP_DOMAIN + ACME email):
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod --profile https up -d --build
+
+services:
+  mcp:
+    build:
+      context: ./packages/mcp-server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.prod
+    environment:
+      WORDPRESS_URL: ${WORDPRESS_URL:-}
+      WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-}
+      WORDPRESS_SITE_ID: ${WORDPRESS_SITE_ID:-}
+      WORDPRESS_SITE_NAME: ${WORDPRESS_SITE_NAME:-}
+      WORDPRESS_SITES: ${WORDPRESS_SITES:-}
+      MCP_PUBLIC_URL: ${MCP_PUBLIC_URL}
+      MCP_AUTH_MODE: ${MCP_AUTH_MODE:-mixed}
+      MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-}
+      MCP_AUTH_DISABLED: ${MCP_AUTH_DISABLED:-false}
+      OAUTH_ISSUER_URL: ${OAUTH_ISSUER_URL:-}
+      OAUTH_TOKEN_TTL_SECONDS: ${OAUTH_TOKEN_TTL_SECONDS:-3600}
+      MCP_PORT: ${MCP_PORT:-3000}
+      MCP_HOST: ${MCP_HOST:-0.0.0.0}
+    expose:
+      - "3000"
+    ports:
+      - "${MCP_PUBLISH:-127.0.0.1:3000:3000}"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  caddy:
+    profiles: ["https"]
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      MCP_DOMAIN: ${MCP_DOMAIN:?Set MCP_DOMAIN for HTTPS profile}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./docker/caddy/Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      mcp:
+        condition: service_healthy
+
+  ngrok:
+    profiles: ["tunnel"]
+    image: ngrok/ngrok:alpine
+    restart: unless-stopped
+    command: http mcp:3000 --log stdout
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?Set NGROK_AUTHTOKEN for tunnel profile}
+    ports:
+      - "4040:4040"
+    depends_on:
+      mcp:
+        condition: service_healthy
+
+volumes:
+  caddy-data:
+  caddy-config:

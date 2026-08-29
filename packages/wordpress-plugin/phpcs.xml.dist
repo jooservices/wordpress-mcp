@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<ruleset name="WordPress MCP Plugin">
+    <description>PHPCS for WordPress MCP plugin</description>
+    <file>src</file>
+    <rule ref="PSR12"/>
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="140"/>
+            <property name="absoluteLineLimit" value="160"/>
+        </properties>
+    </rule>
+</ruleset>

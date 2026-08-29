@@ -1,0 +1,4 @@
+{$MCP_DOMAIN} {
+	email {$ACME_EMAIL}
+	reverse_proxy mcp:3000
+}

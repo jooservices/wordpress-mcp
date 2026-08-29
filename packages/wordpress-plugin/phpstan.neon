@@ -1,0 +1,13 @@
+parameters:
+    level: 6
+    paths:
+        - src
+    excludePaths:
+        - tests
+    bootstrapFiles:
+        - vendor/php-stubs/wordpress-stubs/wordpress-stubs.php
+        - tests/phpstan-bootstrap.php
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        - '#Path in require_once\(\).*upgrade\.php#'
+        - '#Path in require_once\(\).*wp-admin/includes/(file|media|image)\.php#'

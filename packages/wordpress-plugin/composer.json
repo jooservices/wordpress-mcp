@@ -1,0 +1,46 @@
+{
+    "name": "jooservices/wordpress-mcp-plugin",
+    "description": "WordPress plugin providing scoped REST API for ChatGPT MCP integration.",
+    "type": "wordpress-plugin",
+    "license": "MIT",
+    "require": {
+        "php": "^8.3"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.24",
+        "laravel/pint": "^1.18",
+        "php-stubs/wordpress-stubs": "^6.8",
+        "phpmd/phpmd": "^2.15",
+        "phpstan/phpstan": "^2.0",
+        "phpstan/phpstan-phpunit": "^2.0",
+        "phpunit/phpunit": "^12.0",
+        "squizlabs/php_codesniffer": "^3.13.6 || ^4.0.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "JOOservices\\WordPressMcp\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "JOOservices\\WordPressMcp\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "lint:pint": "pint --test",
+        "lint:pint:fix": "pint",
+        "lint:phpcs": "phpcs --standard=phpcs.xml.dist",
+        "lint:phpstan": "XDEBUG_MODE=off phpstan analyse --configuration=phpstan.neon --memory-limit=1G",
+        "lint:phpmd": "php -d error_reporting=6143 vendor/bin/phpmd src text phpmd.xml.dist",
+        "lint": ["@lint:pint", "@lint:phpcs", "@lint:phpstan"],
+        "lint:all": ["@lint:pint", "@lint:phpcs", "@lint:phpstan"],
+        "lint:fix": ["@lint:pint:fix"],
+        "test": "phpunit --no-coverage",
+        "test:coverage": "phpunit --coverage-text --coverage-clover build/coverage.xml && php tools/ensure-coverage.php build/coverage.xml 15",
+        "ci": ["@lint:all", "@test:coverage"]
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {}
+    }
+}
