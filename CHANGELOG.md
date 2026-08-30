@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-30
+
 ### Added
 
 - OAuth refresh tokens with rotation and persistent client/token storage (`OAUTH_DATA_DIR` Docker volume)
@@ -59,5 +61,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.0.0...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.1.0...develop
+[1.1.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jooservices/wordpress-mcp/releases/tag/v1.0.0

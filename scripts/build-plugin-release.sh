@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_SRC="$ROOT/packages/wordpress-plugin"
 STAGE="$ROOT/build/wordpress-chatgpt"
-ZIP="$ROOT/build/wordpress-chatgpt-1.0.0.zip"
+ZIP="$ROOT/build/wordpress-chatgpt-1.1.0.zip"
 
 rm -rf "$STAGE" "$ZIP"
 mkdir -p "$STAGE"

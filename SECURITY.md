@@ -27,7 +27,7 @@ Comment API responses exclude author email addresses (PII minimization).
 - MCP server logs errors without Authorization headers
 - WordPress audit log for mutations; post bodies truncated in metadata
 
-## Known limitations (v1.0.0)
+## Known limitations (v1.1.0)
 
 - Built-in OAuth persists clients and tokens to `OAUTH_DATA_DIR` (default `/app/data/oauth`); mount a Docker volume in production
 - Access tokens expire per `OAUTH_TOKEN_TTL_SECONDS`; ChatGPT refreshes silently via `refresh_token` (TTL: `OAUTH_REFRESH_TTL_SECONDS`, default 90 days)

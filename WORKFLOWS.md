@@ -28,14 +28,14 @@ graph LR
 | `make ci` | Full quality gate |
 | `make test` | Unit tests only |
 | `make integration` | Live stack integration (requires `make up`) |
-| `make plugin-release` | Build `build/wordpress-chatgpt-1.0.0.zip` |
+| `make plugin-release` | Build `build/wordpress-chatgpt-1.1.0.zip` |
 
 ## Release (v1.0.0+)
 
-1. Cut `release/1.0.0` from `develop`
+1. Cut `release/x.y.z` from `develop`
 2. Update CHANGELOG version section
 3. PR to `master`; CI must be green
-4. Tag `v1.0.0` on `master`
+4. Tag `vx.y.z` on `master`
 5. PR merge `master` → `develop`
 
 ## Docker services (dev)
