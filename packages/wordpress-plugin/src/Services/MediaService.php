@@ -93,7 +93,7 @@ final class MediaService
 
         $upload = wp_upload_bits($fileName, null, $content);
 
-        if ($upload['error'] !== '') {
+        if ($upload['error'] !== false) {
             return ['media' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
         }
 
@@ -127,6 +127,49 @@ final class MediaService
     }
 
     /**
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, error: string|null}
+     */
+    public function update(int $id, array $data): array
+    {
+        if (get_post_type($id) !== 'attachment') {
+            return ['media' => null, 'error' => ErrorCodes::MEDIA_NOT_FOUND];
+        }
+
+        $allowed = ['title', 'caption', 'description'];
+        $update = ['ID' => $id];
+
+        foreach ($allowed as $field) {
+            if (array_key_exists($field, $data)) {
+                $update[$field === 'title' ? 'post_title' : ($field === 'caption' ? 'post_excerpt' : 'post_content')]
+                    = sanitize_textarea_field((string) $data[$field]);
+            }
+        }
+
+        if (count($update) > 1 && is_wp_error(wp_update_post($update, true))) {
+            return ['media' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
+        }
+
+        if (array_key_exists('alt_text', $data)) {
+            update_post_meta($id, '_wp_attachment_image_alt', sanitize_text_field((string) $data['alt_text']));
+        }
+
+        return ['media' => $this->normalize($id), 'error' => null];
+    }
+
+    /** @return array{deleted: bool, error: string|null} */
+    public function delete(int $id): array
+    {
+        if (get_post_type($id) !== 'attachment') {
+            return ['deleted' => false, 'error' => ErrorCodes::MEDIA_NOT_FOUND];
+        }
+
+        return wp_delete_attachment($id, true) instanceof \WP_Post
+            ? ['deleted' => true, 'error' => null]
+            : ['deleted' => false, 'error' => ErrorCodes::WORDPRESS_ERROR];
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     private function normalize(int $id): ?array
@@ -143,6 +186,9 @@ final class MediaService
             'url' => $url,
             'mime_type' => get_post_mime_type($id),
             'file_name' => basename((string) get_attached_file($id)),
+            'alt_text' => (string) get_post_meta($id, '_wp_attachment_image_alt', true),
+            'caption' => (string) get_post_field('post_excerpt', $id),
+            'description' => (string) get_post_field('post_content', $id),
             'created_at' => get_post_time('c', true, $id),
         ];
     }

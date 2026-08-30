@@ -30,7 +30,7 @@
         "lint:pint": "pint --test",
         "lint:pint:fix": "pint",
         "lint:phpcs": "phpcs --standard=phpcs.xml.dist",
-        "lint:phpstan": "XDEBUG_MODE=off phpstan analyse --configuration=phpstan.neon --memory-limit=1G",
+        "lint:phpstan": "XDEBUG_MODE=off phpstan analyse --configuration=phpstan.neon --memory-limit=2G",
         "lint:phpmd": "php -d error_reporting=6143 vendor/bin/phpmd src text phpmd.xml.dist",
         "lint": ["@lint:pint", "@lint:phpcs", "@lint:phpstan"],
         "lint:all": ["@lint:pint", "@lint:phpcs", "@lint:phpstan"],

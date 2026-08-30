@@ -14,6 +14,7 @@ export interface ProposedContentUpdate {
   status?: string;
   categories?: number[];
   tags?: string[];
+  featured_media?: number;
 }
 
 function sortedCopy(values: unknown[]): unknown[] {
@@ -37,7 +38,7 @@ function arraysEqual(a: unknown[], b: unknown[]): boolean {
 export function computeContentChanges(current: ContentDto, proposed: ProposedContentUpdate): ContentChange[] {
   const changes: ContentChange[] = [];
 
-  const scalarFields = ["title", "content", "excerpt", "slug", "status"] as const;
+  const scalarFields = ["title", "content", "excerpt", "slug", "status", "featured_media"] as const;
   for (const field of scalarFields) {
     const value = proposed[field];
 

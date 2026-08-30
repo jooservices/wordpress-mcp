@@ -8,7 +8,9 @@ use JOOservices\WordPressMcp\Admin\AdminMenu;
 use JOOservices\WordPressMcp\Audit\AuditLogger;
 use JOOservices\WordPressMcp\Database\Schema;
 use JOOservices\WordPressMcp\Http\RestRegistrar;
+use JOOservices\WordPressMcp\Services\SiteOperationsService;
 use JOOservices\WordPressMcp\Services\SeoService;
+use JOOservices\WordPressMcp\Services\RedirectService;
 
 final class Plugin
 {
@@ -46,9 +48,22 @@ final class Plugin
         add_action('plugins_loaded', [Schema::class, 'maybeUpgrade']);
         add_action(self::PURGE_CRON_HOOK, [self::class, 'purgeAuditLog']);
         add_action('rest_api_init', [new RestRegistrar(), 'register']);
+        add_action('template_redirect', [self::class, 'enforceMaintenance'], 0);
+        add_action('template_redirect', [RedirectService::class, 'applyAndLog'], 1);
         $adminMenu = new AdminMenu();
         add_action('admin_menu', [$adminMenu, 'register']);
         add_action('admin_init', [$adminMenu, 'registerPostHandlers']);
         add_filter('robots_txt', [SeoService::class, 'filterRobotsTxt']);
+    }
+
+    public static function enforceMaintenance(): void
+    {
+        if (! get_option(SiteOperationsService::MAINTENANCE_OPTION, false) || current_user_can('manage_options')) {
+            return;
+        }
+
+        status_header(503);
+        header('Retry-After: 600');
+        wp_die('This site is temporarily under maintenance.', 'Maintenance', ['response' => 503]);
     }
 }
