@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - OAuth client registration could hit a shared rate-limit bucket for all clients when the MCP server ran behind a reverse proxy without `trust proxy` (`MCP_TRUST_PROXY`, default on)
+- WordPress Settings save posted to a blank `admin-post.php` page because `admin_post_*` handlers were registered on `admin_menu` instead of `admin_init`
 
 ## [1.2.0] - 2026-08-30
 

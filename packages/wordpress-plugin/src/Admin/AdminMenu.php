@@ -43,7 +43,10 @@ final class AdminMenu
             'chatgpt-settings',
             [$this, 'renderSettings'],
         );
+    }
 
+    public function registerPostHandlers(): void
+    {
         add_action('admin_post_' . self::EXPORT_ACTION, [$this, 'exportAuditLog']);
         add_action('admin_post_chatgpt_save_settings', [$this, 'saveSettings']);
     }
