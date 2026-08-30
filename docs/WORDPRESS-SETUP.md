@@ -38,6 +38,26 @@ Or use the Docker dev stack (`make up`) which mounts the plugin automatically.
 
 All scopes are selectable per connection in wp-admin. Uncheck scopes you do not need (e.g. omit `posts.publish` to block publishing).
 
+## Rate limiting
+
+wp-admin → **WordPress - MCP** → **Settings** controls REST API rate limits per connection token:
+
+| Setting | Default |
+|---------|---------|
+| Enable rate limiting | On |
+| Max requests | 120 |
+| Window | 60 seconds |
+
+Override via `wp-config.php` constants when needed:
+
+```php
+define('MCP_RATE_LIMIT_ENABLED', true);
+define('MCP_RATE_LIMIT_MAX', 120);
+define('MCP_RATE_LIMIT_WINDOW_SECONDS', 60);
+```
+
+OAuth rate limits on the MCP server itself are configured in `.env.prod` — see [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Audit log
 
 wp-admin → **WordPress - MCP** → **Audit Log** shows every MCP request (reads, writes, and denials) with filters by action/resource type/date, a summary, and CSV export. Retention defaults to 90 days (`MCP_LOG_RETENTION_DAYS`, or the `MCP_LOG_RETENTION_DAYS` PHP constant in `wp-config.php`), purged daily via cron. No prompt or token content is ever stored.

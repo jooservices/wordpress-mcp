@@ -28,7 +28,7 @@ Comment API responses exclude author email addresses (PII minimization).
 - MCP server logs errors without Authorization headers
 - WordPress audit log covers every request (reads, writes, and denials), correlated with the MCP server's own event log via `X-Request-Id`; post bodies truncated in metadata; never stores prompt or token content; retained for `MCP_LOG_RETENTION_DAYS` (default 90), purged daily
 
-## Known limitations (v1.2.0)
+## Known limitations (v1.2.1)
 
 - Built-in OAuth persists clients and tokens to `OAUTH_DATA_DIR` (default `/app/data/oauth`); mount a Docker volume in production
 - Access tokens expire per `OAUTH_TOKEN_TTL_SECONDS`; ChatGPT refreshes silently via `refresh_token` (TTL: `OAUTH_REFRESH_TTL_SECONDS`, default 90 days)

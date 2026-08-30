@@ -10,6 +10,7 @@ import { resourceUrlFromServerUrl, checkResourceAllowed } from "@modelcontextpro
 import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Config } from "../config.js";
+import { buildOAuthRateLimitOptions } from "./oauthRateLimit.js";
 import { createOAuthProvider } from "./provider.js";
 import { OAUTH_SCOPES } from "./types.js";
 
@@ -53,6 +54,8 @@ export function setupOAuth(app: Express, config: Config): OAuthRuntime {
 
   oauthMetadata.introspection_endpoint = new URL("/oauth/introspect", issuerUrl).href;
 
+  const oauthRateLimit = config.oauthRateLimit;
+
   app.use(
     mcpAuthRouter({
       provider,
@@ -60,6 +63,18 @@ export function setupOAuth(app: Express, config: Config): OAuthRuntime {
       scopesSupported: SCOPES_SUPPORTED,
       resourceServerUrl: mcpResourceUrl,
       resourceName: "WordPress MCP",
+      clientRegistrationOptions: {
+        rateLimit: buildOAuthRateLimitOptions(oauthRateLimit, "register"),
+      },
+      tokenOptions: {
+        rateLimit: buildOAuthRateLimitOptions(oauthRateLimit, "token"),
+      },
+      authorizationOptions: {
+        rateLimit: buildOAuthRateLimitOptions(oauthRateLimit, "authorize"),
+      },
+      revocationOptions: {
+        rateLimit: buildOAuthRateLimitOptions(oauthRateLimit, "revoke"),
+      },
     }),
   );
 

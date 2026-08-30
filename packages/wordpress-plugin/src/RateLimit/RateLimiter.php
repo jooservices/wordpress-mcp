@@ -15,6 +15,14 @@ final class RateLimiter
     ) {
     }
 
+    public static function fromSettings(): self
+    {
+        return new self(
+            RateLimitSettings::maxRequests(),
+            RateLimitSettings::windowSeconds(),
+        );
+    }
+
     public function isAllowed(int $connectionId): bool
     {
         $key = 'chatgpt_rl_' . $connectionId;

@@ -46,7 +46,9 @@ final class Plugin
         add_action('plugins_loaded', [Schema::class, 'maybeUpgrade']);
         add_action(self::PURGE_CRON_HOOK, [self::class, 'purgeAuditLog']);
         add_action('rest_api_init', [new RestRegistrar(), 'register']);
-        add_action('admin_menu', [new AdminMenu(), 'register']);
+        $adminMenu = new AdminMenu();
+        add_action('admin_menu', [$adminMenu, 'register']);
+        add_action('admin_init', [$adminMenu, 'registerPostHandlers']);
         add_filter('robots_txt', [SeoService::class, 'filterRobotsTxt']);
     }
 }
