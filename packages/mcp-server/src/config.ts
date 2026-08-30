@@ -141,7 +141,8 @@ export function loadConfig(): Config {
     mcpSessionIdleMs: parsePositiveInt(process.env.MCP_SESSION_IDLE_MS, 30 * 60 * 1000),
     // A sanity backstop against unbounded buffering, not a business rule — the
     // real ceiling for uploads/content size is WordPress's own PHP limits
-    // (see wordpress_get_site_limits), which MCP should never pre-empt.
+    // WordPress reports authoritative upload limits via wordpress_get_site,
+    // which MCP should never pre-empt.
     mcpJsonBodyLimit: process.env.MCP_JSON_BODY_LIMIT ?? "100mb",
   };
 }

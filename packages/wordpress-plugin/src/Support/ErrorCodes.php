@@ -12,8 +12,11 @@ final class ErrorCodes
     public const COMMENT_NOT_FOUND = 'COMMENT_NOT_FOUND';
     public const MEDIA_NOT_FOUND = 'MEDIA_NOT_FOUND';
     public const INVALID_ARGUMENT = 'INVALID_ARGUMENT';
+    public const MEDIA_UPLOAD_LIMIT_EXCEEDED = 'MEDIA_UPLOAD_LIMIT_EXCEEDED';
+    public const MEDIA_VERIFY_FAILED = 'MEDIA_VERIFY_FAILED';
     public const WORDPRESS_ERROR = 'WORDPRESS_ERROR';
     public const RATE_LIMITED = 'RATE_LIMITED';
+    public const TEMPLATE_NOT_FOUND = 'TEMPLATE_NOT_FOUND';
 
     /**
      * @param array<string, mixed> $data

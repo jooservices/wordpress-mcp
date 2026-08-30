@@ -57,21 +57,34 @@ describe.skipIf(!runIntegration)("integration", () => {
       "Content-Type": "application/json",
     };
     const plugin = "hello.php";
-    const activate = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/activate`, {
+    const activate = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/state`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ plugin }),
+      body: JSON.stringify({ plugin, enabled: true }),
     });
     expect(activate.status).toBe(200);
     expect(((await activate.json()) as { active: boolean }).active).toBe(true);
 
-    const deactivate = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/deactivate`, {
+    const deactivate = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/state`, {
       method: "POST",
       headers,
-      body: JSON.stringify({ plugin }),
+      body: JSON.stringify({ plugin, enabled: false }),
     });
     expect(deactivate.status).toBe(200);
     expect(((await deactivate.json()) as { active: boolean }).active).toBe(false);
+  });
+
+  it("returns expanded site info including limits", async () => {
+    const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/site`, {
+      headers: { Authorization: `Bearer ${wpToken}` },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      limits: { wp_max_upload_size_bytes: number };
+      core_update_available: boolean;
+    };
+    expect(body.limits.wp_max_upload_size_bytes).toBeGreaterThan(0);
+    expect(typeof body.core_update_available).toBe("boolean");
   });
 
   it("denies WordPress API without token", async () => {
@@ -116,26 +129,42 @@ describe.skipIf(!runIntegration)("integration", () => {
     expect(body.id).toBeGreaterThan(0);
   });
 
-  it("uploads an image and attaches it as featured media", async () => {
+  it("uploads a verified png and attaches it as featured media", async () => {
     const stamp = Date.now();
     const headers = {
       Authorization: `Bearer ${wpToken}`,
       "Content-Type": "application/json",
     };
+    const pngBase64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     const upload = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/media`, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        file_name: `featured-${stamp}.gif`,
-        mime_type: "image/gif",
-        content_base64: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
         title: `Featured image ${stamp}`,
+        image_type: "featured",
+        content_base64: pngBase64,
+        alt_text: `Alt ${stamp}`,
       }),
     });
 
     expect(upload.status).toBe(201);
-    const media = (await upload.json()) as { id: number };
+    const media = (await upload.json()) as {
+      id: number;
+      file_name: string;
+      slug_base?: string;
+      image_type?: string;
+      verification?: { passed?: boolean; sha256_match?: boolean; public_url_ok?: boolean };
+      verified?: boolean;
+    };
     expect(media.id).toBeGreaterThan(0);
+    expect(media.file_name).toMatch(/^featured-image-\d+-featured\.png$/);
+    expect(media.slug_base).toMatch(/^featured-image-\d+-featured$/);
+    expect(media.image_type).toBe("featured");
+    expect(media.verification?.passed).toBe(true);
+    expect(media.verification?.sha256_match).toBe(true);
+    expect(media.verification?.public_url_ok).toBe(true);
+    expect(media.verified).toBe(true);
 
     const create = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/content`, {
       method: "POST",
@@ -163,6 +192,26 @@ describe.skipIf(!runIntegration)("integration", () => {
     });
     expect(clear.status).toBe(200);
     expect(((await clear.json()) as { featured_media: number }).featured_media).toBe(0);
+  });
+
+  it("rejects corrupted uploads without creating usable featured media", async () => {
+    const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/media`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${wpToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        title: "Broken image",
+        image_type: "inline",
+        content_base64: Buffer.from("not-an-image").toString("base64"),
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { code?: string; data?: { verification_step?: string } };
+    expect(body.code).toBe("MEDIA_VERIFY_FAILED");
+    expect(body.data?.verification_step).toMatch(/^pre_validate\./);
   });
 });
 

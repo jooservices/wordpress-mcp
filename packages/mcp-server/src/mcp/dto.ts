@@ -1,6 +1,7 @@
 export type DtoKind =
   | "site"
   | "content"
+  | "post_template"
   | "comment"
   | "term"
   | "media"
@@ -42,6 +43,20 @@ export type ContentDto = {
   featured_media: number;
 };
 
+export type PostTemplateDto = {
+  id: number;
+  title: string;
+  slug: string;
+  for_type: string;
+  is_default: boolean;
+  match_category_slugs: string[];
+  match_title_keywords: string[];
+  updated_at?: string;
+  content?: string;
+  excerpt?: string;
+  featured_media?: number;
+};
+
 export type CommentDto = {
   id: number;
   post_id: number;
@@ -57,16 +72,39 @@ export type TermDto = {
   slug: string;
 };
 
+export type MediaVerificationDto = {
+  passed: boolean;
+  source_bytes?: number;
+  stored_bytes?: number | null;
+  sha256?: string;
+  stored_sha256?: string | null;
+  sha256_match?: boolean | null;
+  mime_detected?: string;
+  mime_stored?: string | null;
+  width?: number;
+  height?: number;
+  decode_ok?: boolean;
+  metadata_generated?: boolean;
+  public_url_ok?: boolean | null;
+  public_url_status?: number | null;
+  featured_set?: boolean;
+  failed_step?: string | null;
+};
+
 export type MediaDto = {
   id: number;
   title: string;
   url: string;
   mime_type: string;
   file_name: string;
+  slug_base?: string | null;
+  image_type?: string | null;
   created_at: string;
   alt_text?: string;
   caption?: string;
   description?: string;
+  verified?: boolean;
+  verification?: MediaVerificationDto;
 };
 
 export type SettingsDto = {
@@ -114,6 +152,14 @@ export type SiteDto = {
   wordpress_version: string;
   timezone: string;
   supported_capabilities: string[];
+  limits: SiteLimitsDto;
+  core_update_available: boolean;
+  core_update_version: string | null;
+  maintenance_enabled: boolean;
+  is_multisite: boolean;
+  active_theme: SiteThemeSummaryDto | null;
+  active_plugins_count: number;
+  settings: SettingsDto | null;
 };
 
 export type SiteLimitsDto = {
@@ -122,6 +168,12 @@ export type SiteLimitsDto = {
   memory_limit: string;
   max_execution_time: string;
   wp_max_upload_size_bytes: number;
+};
+
+export type SiteThemeSummaryDto = {
+  stylesheet: string;
+  name: string;
+  version: string;
 };
 
 export type RobotsDto = {
@@ -167,7 +219,23 @@ export type PaginatedDto<T> = {
 };
 
 const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
-  site: new Set(["name", "url", "wordpress_version", "timezone", "supported_capabilities"]),
+  site: new Set([
+    "name",
+    "url",
+    "wordpress_version",
+    "timezone",
+    "supported_capabilities",
+    "limits",
+    "core_update_available",
+    "core_update_version",
+    "maintenance_enabled",
+    "is_multisite",
+    "active_theme",
+    "active_plugins_count",
+    "settings",
+    "health",
+    "updates",
+  ]),
   site_limits: new Set([
     "upload_max_filesize",
     "post_max_size",
@@ -176,7 +244,7 @@ const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
     "wp_max_upload_size_bytes",
   ]),
   robots: new Set(["content", "source"]),
-  seo_metadata: new Set(["id", "provider", "title", "description", "canonical", "og_title", "og_description", "noindex"]),
+  seo_metadata: new Set(["id", "provider", "title", "description", "canonical", "og_title", "og_description", "noindex", "audit"]),
   seo_audit: new Set(["findings"]),
   content: new Set([
     "id",
@@ -194,9 +262,22 @@ const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
     "created_at",
     "featured_media",
   ]),
+  post_template: new Set([
+    "id",
+    "title",
+    "slug",
+    "for_type",
+    "is_default",
+    "match_category_slugs",
+    "match_title_keywords",
+    "updated_at",
+    "content",
+    "excerpt",
+    "featured_media",
+  ]),
   comment: new Set(["id", "post_id", "author", "content", "status", "created_at"]),
   term: new Set(["id", "name", "slug"]),
-  media: new Set(["id", "title", "url", "mime_type", "file_name", "created_at", "alt_text", "caption", "description"]),
+  media: new Set(["id", "title", "url", "mime_type", "file_name", "slug_base", "image_type", "created_at", "alt_text", "caption", "description", "verified", "verification"]),
   plugin: new Set(["plugin", "name", "version", "active", "update_available"]),
   theme: new Set(["stylesheet", "name", "version", "active", "update_available"]),
   user: new Set(["id", "login", "email", "display_name", "roles", "registered_at"]),
@@ -204,7 +285,26 @@ const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
 };
 
 const AUTHOR_REF_FIELDS = new Set(["id", "name"]);
+const SITE_THEME_SUMMARY_FIELDS = new Set(["stylesheet", "name", "version"]);
 const TERM_REF_FIELDS = new Set(["id", "name", "slug"]);
+const MEDIA_VERIFICATION_FIELDS = new Set([
+  "passed",
+  "source_bytes",
+  "stored_bytes",
+  "sha256",
+  "stored_sha256",
+  "sha256_match",
+  "mime_detected",
+  "mime_stored",
+  "width",
+  "height",
+  "decode_ok",
+  "metadata_generated",
+  "public_url_ok",
+  "public_url_status",
+  "featured_set",
+  "failed_step",
+]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -232,6 +332,22 @@ function projectFields(value: unknown, allowed: ReadonlySet<string>): Record<str
  * couple of explicit projections cover it without a generic recursive
  * sanitizer (nothing else needs one yet).
  */
+function projectNestedSiteFields(result: Record<string, unknown>): void {
+  if ("limits" in result) {
+    result.limits = isRecord(result.limits) ? projectFields(result.limits, PROTOCOL_FIELDS.site_limits) : undefined;
+  }
+
+  if ("settings" in result && result.settings !== null) {
+    result.settings = isRecord(result.settings) ? projectFields(result.settings, PROTOCOL_FIELDS.settings) : null;
+  }
+
+  if ("active_theme" in result && result.active_theme !== null) {
+    result.active_theme = isRecord(result.active_theme)
+      ? projectFields(result.active_theme, SITE_THEME_SUMMARY_FIELDS)
+      : null;
+  }
+}
+
 function projectNestedContentFields(result: Record<string, unknown>): void {
   if ("author" in result) {
     result.author = isRecord(result.author) ? projectFields(result.author, AUTHOR_REF_FIELDS) : undefined;
@@ -251,6 +367,20 @@ export function sanitizeRecord(kind: DtoKind, value: unknown): Record<string, un
 
   if (kind === "content") {
     projectNestedContentFields(result);
+  }
+
+  if (kind === "site") {
+    projectNestedSiteFields(result);
+  }
+
+  if (kind === "media" && "verification" in result) {
+    result.verification = isRecord(result.verification)
+      ? projectFields(result.verification, MEDIA_VERIFICATION_FIELDS)
+      : undefined;
+  }
+
+  if (kind === "seo_metadata" && "audit" in result && isRecord(result.audit)) {
+    result.audit = projectFields(result.audit, PROTOCOL_FIELDS.seo_audit);
   }
 
   return result;
