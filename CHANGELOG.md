@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-30
+
+### Added
+
+- **Configurable OAuth rate limits** on the MCP server via `.env`: enable/disable (`MCP_OAUTH_RATE_LIMIT_ENABLED`) and per-endpoint max/window for registration, token, authorize, and revoke
+- **Configurable REST rate limits** on the WordPress plugin via wp-admin → **WordPress - MCP** → **Settings** (enable/disable, max requests, window seconds)
+- Optional `wp-config.php` overrides for plugin rate limits: `MCP_RATE_LIMIT_ENABLED`, `MCP_RATE_LIMIT_MAX`, `MCP_RATE_LIMIT_WINDOW_SECONDS`
+
+### Fixed
+
+- OAuth client registration could hit a shared rate-limit bucket for all clients when the MCP server ran behind a reverse proxy without `trust proxy` (`MCP_TRUST_PROXY`, default on)
+- WordPress Settings save posted to a blank `admin-post.php` page because `admin_post_*` handlers were registered on `admin_menu` instead of `admin_init`
+
 ## [1.2.0] - 2026-08-30
 
 ### Added
@@ -113,6 +126,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.1.0...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.1...develop
+[1.2.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/jooservices/wordpress-mcp/releases/tag/v1.0.0

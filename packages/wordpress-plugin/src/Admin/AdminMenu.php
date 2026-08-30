@@ -7,6 +7,7 @@ namespace JOOservices\WordPressMcp\Admin;
 use JOOservices\WordPressMcp\Auth\ConnectionAuthenticator;
 use JOOservices\WordPressMcp\Auth\ScopeChecker;
 use JOOservices\WordPressMcp\Database\Schema;
+use JOOservices\WordPressMcp\RateLimit\RateLimitSettings;
 use JOOservices\WordPressMcp\Services\StatsService;
 
 final class AdminMenu
@@ -34,7 +35,20 @@ final class AdminMenu
             [$this, 'renderAudit'],
         );
 
+        add_submenu_page(
+            'chatgpt-connector',
+            'Settings',
+            'Settings',
+            'manage_options',
+            'chatgpt-settings',
+            [$this, 'renderSettings'],
+        );
+    }
+
+    public function registerPostHandlers(): void
+    {
         add_action('admin_post_' . self::EXPORT_ACTION, [$this, 'exportAuditLog']);
+        add_action('admin_post_chatgpt_save_settings', [$this, 'saveSettings']);
     }
 
     public function renderConnections(): void
@@ -72,6 +86,43 @@ final class AdminMenu
         );
 
         include JOOSERVICES_WORDPRESS_MCP_PATH . 'templates/admin-audit.php';
+    }
+
+    public function renderSettings(): void
+    {
+        if (! current_user_can('manage_options')) {
+            return;
+        }
+
+        $settings = RateLimitSettings::snapshot();
+        $saved = isset($_GET['settings-updated']) && $_GET['settings-updated'] === '1';
+
+        include JOOSERVICES_WORDPRESS_MCP_PATH . 'templates/admin-settings.php';
+    }
+
+    public function saveSettings(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Forbidden', 403);
+        }
+
+        check_admin_referer('chatgpt_save_settings');
+
+        if (defined('MCP_RATE_LIMIT_ENABLED') || defined('MCP_RATE_LIMIT_MAX') || defined('MCP_RATE_LIMIT_WINDOW_SECONDS')) {
+            wp_safe_redirect(add_query_arg('settings-error', 'constants', admin_url('admin.php?page=chatgpt-settings')));
+            exit;
+        }
+
+        $enabled = isset($_POST['rate_limit_enabled']) ? '1' : '0';
+        $max = max(1, (int) ($_POST['rate_limit_max'] ?? RateLimitSettings::maxRequests()));
+        $window = max(1, (int) ($_POST['rate_limit_window_seconds'] ?? RateLimitSettings::windowSeconds()));
+
+        update_option(RateLimitSettings::ENABLED_OPTION, $enabled);
+        update_option(RateLimitSettings::MAX_OPTION, $max);
+        update_option(RateLimitSettings::WINDOW_OPTION, $window);
+
+        wp_safe_redirect(add_query_arg('settings-updated', '1', admin_url('admin.php?page=chatgpt-settings')));
+        exit;
     }
 
     public function exportAuditLog(): void
