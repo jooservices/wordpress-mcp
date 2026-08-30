@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+if (! function_exists('sanitize_key')) {
+    function sanitize_key(string $key): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9_\-]/', '', $key) ?? '');
+    }
+}
+
 if (! function_exists('get_transient')) {
     /** @var array<string, mixed> $GLOBALS['wp_test_transients'] */
     $GLOBALS['wp_test_transients'] = [];

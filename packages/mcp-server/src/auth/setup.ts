@@ -10,11 +10,11 @@ import { resourceUrlFromServerUrl, checkResourceAllowed } from "@modelcontextpro
 import type { OAuthMetadata } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { Config } from "../config.js";
-import { WordPressOAuthProvider } from "./provider.js";
+import { createOAuthProvider } from "./provider.js";
 import { OAUTH_SCOPES } from "./types.js";
 
 export type OAuthRuntime = {
-  provider: WordPressOAuthProvider;
+  provider: ReturnType<typeof createOAuthProvider>;
   oauthMetadata: OAuthMetadata;
   resourceMetadataUrl: string;
   mcpResourceUrl: URL;
@@ -39,7 +39,12 @@ export function setupOAuth(app: Express, config: Config): OAuthRuntime {
     return checkResourceAllowed({ requestedResource: resource, configuredResource: expected });
   };
 
-  const provider = new WordPressOAuthProvider(validateResource, config.oauthTokenTtlSeconds);
+  const provider = createOAuthProvider({
+    dataDir: config.oauthDataDir,
+    validateResource,
+    tokenTtlSeconds: config.oauthTokenTtlSeconds,
+    refreshTtlSeconds: config.oauthRefreshTtlSeconds,
+  });
   const oauthMetadata = createOAuthMetadata({
     provider,
     issuerUrl,

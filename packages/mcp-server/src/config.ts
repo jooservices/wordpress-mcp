@@ -10,6 +10,8 @@ export interface Config {
   mcpPublicUrl: string;
   oauthIssuerUrl: string;
   oauthTokenTtlSeconds: number;
+  oauthRefreshTtlSeconds: number;
+  oauthDataDir: string;
   port: number;
   host: string;
 }
@@ -52,6 +54,8 @@ export function loadConfig(): Config {
     mcpPublicUrl,
     oauthIssuerUrl,
     oauthTokenTtlSeconds: Number(process.env.OAUTH_TOKEN_TTL_SECONDS ?? 3600),
+    oauthRefreshTtlSeconds: Number(process.env.OAUTH_REFRESH_TTL_SECONDS ?? 7_776_000),
+    oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
     port: Number(process.env.MCP_PORT ?? 3000),
     host: process.env.MCP_HOST ?? "0.0.0.0",
   };
