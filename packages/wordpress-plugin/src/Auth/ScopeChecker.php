@@ -42,11 +42,13 @@ final class ScopeChecker
         'users.assign_roles',
         'users.delete',
         'posts.read',
+        'posts.templates.read',
         'posts.create',
         'posts.update',
         'posts.publish',
         'posts.delete',
         'pages.read',
+        'pages.templates.read',
         'pages.create',
         'pages.update',
         'pages.publish',
@@ -128,6 +130,17 @@ final class ScopeChecker
         return self::hasScope($connection, 'terms.read');
     }
 
+    public static function canReadTemplates(Connection $connection, string $type): bool
+    {
+        if (! ContentTypes::isSupported($type)) {
+            return false;
+        }
+
+        $scope = $type === ContentTypes::PAGE ? 'pages.templates.read' : 'posts.templates.read';
+
+        return self::hasScope($connection, $scope);
+    }
+
     public static function canUploadMedia(Connection $connection): bool
     {
         return self::hasScope($connection, 'media.upload');
@@ -142,6 +155,7 @@ final class ScopeChecker
     {
         return match ($scope) {
             'site.read', 'posts.read', 'pages.read', 'terms.read' => 'read',
+            'posts.templates.read', 'pages.templates.read' => 'read',
             'seo.robots.update' => 'manage_options',
             'site.health.read' => 'view_site_health_checks',
             'site.maintenance', 'settings.read', 'settings.update' => 'manage_options',

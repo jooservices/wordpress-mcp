@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-08-30
+
+### Added
+
+- **Post templates**: admins define reusable post/page templates in wp-admin with placeholders (`{{content}}`, `{{title}}`, …), default categories/tags, and auto-match rules (category slug or title keyword). `wordpress_list_post_templates` lists them; `wordpress_create_content` accepts `template_id`, `template_slug`, or `use_template` (`auto`, `default`, `none`).
+- **Verified media pipeline**: uploads decode and hash bytes before write, verify the stored attachment (dimensions, SHA-256, metadata), and return a structured `verification` object; failed uploads are rolled back. `wordpress_get_media` accepts `verify: true` to re-check an existing attachment.
+- **Richer `wordpress_get_site`**: returns site info, PHP upload limits, active theme/plugin summary, core update availability, and curated settings when the connection has `settings.read`.
+
+### Changed
+
+- MCP tool surface consolidated from 50 to **42** purpose-built tools. High-level `action` parameters replace many one-action tools:
+  - `wordpress_manage_plugin` (`action: state|update|delete`; `enabled` for activate/deactivate)
+  - `wordpress_manage_theme` (`action: activate|update|delete`)
+  - `wordpress_get_seo` / `wordpress_update_seo` (replaces separate audit/metadata/fix tools; `audit: true`, `apply_fixes: true`)
+  - `wordpress_get_redirects` / `wordpress_manage_redirect` (replaces separate list/404/upsert/delete tools)
+  - `wordpress_get_mcp_activity` (`mode: stats|logs`; replaces `wordpress_get_mcp_stats` and `wordpress_get_mcp_request_log`)
+  - Content diff preview is now `wordpress_update_content` with `preview: true` (replaces `wordpress_preview_content_update`)
+  - Site limits and settings reads are folded into `wordpress_get_site` (replaces `wordpress_get_site_limits` and `wordpress_get_site_settings`)
+
+### Security
+
+- Media uploads reject undecodable images before sideload and delete attachments when post-write verification fails, closing a class of corrupt-or-tampered upload issues.
+
 ## [1.3.0] - 2026-08-30
 
 ### Added
@@ -146,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.3.0...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.0...develop
+[1.4.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.1.0...v1.2.0

@@ -101,7 +101,7 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_OBSERVABILITY_ENABLED` | No | Default on. Structured JSON events per tool call |
 | `MCP_MAX_SESSIONS` | No | Concurrent MCP session cap (default `100`) |
 | `MCP_SESSION_IDLE_MS` | No | Idle session eviction (default `1800000` = 30 min) |
-| `MCP_JSON_BODY_LIMIT` | No | Request body backstop (default `100mb`). WordPress's own PHP limits are the real ceiling — see `wordpress_get_site_limits` |
+| `MCP_JSON_BODY_LIMIT` | No | Request body backstop (default `100mb`). WordPress's own PHP limits are the real ceiling — see `wordpress_get_site` |
 | `MCP_OAUTH_RATE_LIMIT_ENABLED` | No | Default `1`. Set `0`/`false` to disable OAuth endpoint rate limits |
 | `MCP_OAUTH_REGISTER_MAX` | No | Max dynamic client registrations per window (default `20`) |
 | `MCP_OAUTH_REGISTER_WINDOW_MS` | No | Registration window in ms (default `3600000` = 1 hour) |

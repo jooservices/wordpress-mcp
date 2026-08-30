@@ -7,6 +7,8 @@ namespace JOOservices\WordPressMcp\Services;
 use JOOservices\WordPressMcp\Support\ContentNormalizer;
 use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
+use JOOservices\WordPressMcp\Support\MediaStoredVerifier;
+use JOOservices\WordPressMcp\Support\MediaVerificationResult;
 use WP_Post;
 use WP_Query;
 
@@ -14,6 +16,8 @@ final class ContentService
 {
     public function __construct(
         private readonly ContentNormalizer $normalizer = new ContentNormalizer(),
+        private readonly PostTemplateResolver $templateResolver = new PostTemplateResolver(),
+        private readonly PostTemplateService $templateService = new PostTemplateService(),
     ) {
     }
 
@@ -160,6 +164,18 @@ final class ContentService
         if (! in_array($status, ['draft', 'pending', 'publish', 'private'], true)) {
             $status = 'draft';
         }
+
+        $templateResolution = $this->templateResolver->resolve($data, $type);
+
+        if ($templateResolution['error'] !== null) {
+            return ['post' => null, 'error' => $templateResolution['error']];
+        }
+
+        if ($templateResolution['template'] instanceof WP_Post) {
+            $data = $this->templateService->applyTemplate($data, $templateResolution['template']);
+        }
+
+        $data = $this->stripTemplateParams($data);
 
         $featuredMediaError = $this->validateFeaturedMedia($data);
 
@@ -337,7 +353,23 @@ final class ContentService
             return ErrorCodes::MEDIA_NOT_FOUND;
         }
 
-        return wp_attachment_is_image($mediaId) ? null : ErrorCodes::INVALID_ARGUMENT;
+        if (! wp_attachment_is_image($mediaId)) {
+            return ErrorCodes::INVALID_ARGUMENT;
+        }
+
+        if (MediaStoredVerifier::isVerified($mediaId)) {
+            return null;
+        }
+
+        $stored = MediaStoredVerifier::verifyAttachment($mediaId);
+
+        if (! MediaVerificationResult::passed($stored['verification'])) {
+            return ErrorCodes::MEDIA_VERIFY_FAILED;
+        }
+
+        MediaStoredVerifier::markVerified($mediaId);
+
+        return null;
     }
 
     /**
@@ -364,5 +396,16 @@ final class ContentService
         return (bool) ($mediaId === 0
             ? delete_post_thumbnail($postId)
             : set_post_thumbnail($postId, $mediaId));
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function stripTemplateParams(array $data): array
+    {
+        unset($data['template_id'], $data['template_slug'], $data['use_template']);
+
+        return $data;
     }
 }

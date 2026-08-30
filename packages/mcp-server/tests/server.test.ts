@@ -14,46 +14,59 @@ const options: McpServerOptions = {
   protocolVersionPolicy: "fallback",
 };
 
+const EXPECTED_TOOL_ACCESS: Record<string, "read" | "write" | "delete"> = {
+  wordpress_list_sites: "read",
+  wordpress_set_active_site: "read",
+  wordpress_get_site: "read",
+  wordpress_list_plugins: "read",
+  wordpress_install_plugin: "write",
+  wordpress_manage_plugin: "delete",
+  wordpress_list_themes: "read",
+  wordpress_install_theme: "write",
+  wordpress_manage_theme: "delete",
+  wordpress_list_users: "read",
+  wordpress_create_user: "write",
+  wordpress_update_user: "write",
+  wordpress_delete_user: "delete",
+  wordpress_get_mcp_activity: "read",
+  wordpress_search_content: "read",
+  wordpress_get_content: "read",
+  wordpress_list_post_templates: "read",
+  wordpress_create_content: "write",
+  wordpress_update_content: "write",
+  wordpress_delete_content: "delete",
+  wordpress_list_comments: "read",
+  wordpress_get_comment: "read",
+  wordpress_moderate_comment: "write",
+  wordpress_list_terms: "read",
+  wordpress_list_media: "read",
+  wordpress_get_media: "read",
+  wordpress_upload_media: "write",
+  wordpress_update_media: "write",
+  wordpress_delete_media: "delete",
+  wordpress_update_site_settings: "write",
+  wordpress_list_navigation_menus: "read",
+  wordpress_set_maintenance_mode: "write",
+  wordpress_update_core: "write",
+  wordpress_list_revisions: "read",
+  wordpress_restore_revision: "write",
+  wordpress_get_redirects: "read",
+  wordpress_manage_redirect: "delete",
+  wordpress_manage_navigation_menu: "delete",
+  wordpress_get_robots: "read",
+  wordpress_update_robots: "write",
+  wordpress_get_seo: "read",
+  wordpress_update_seo: "write",
+};
+
 describe("createMcpServer", () => {
   it("registers every tool's access level so enforcement can never fall back to a default", () => {
     createMcpServer(registry, options);
 
-    const expected: Record<string, "read" | "write" | "delete"> = {
-      wordpress_list_sites: "read",
-      wordpress_set_active_site: "read",
-      wordpress_get_site: "read",
-      wordpress_get_site_limits: "read",
-      wordpress_list_plugins: "read",
-      wordpress_install_plugin: "write",
-      wordpress_activate_plugin: "write",
-      wordpress_deactivate_plugin: "write",
-      wordpress_update_plugin: "write",
-      wordpress_delete_plugin: "delete",
-      wordpress_get_mcp_stats: "read",
-      wordpress_get_mcp_request_log: "read",
-      wordpress_get_robots: "read",
-      wordpress_update_robots: "write",
-      wordpress_seo_audit: "read",
-      wordpress_get_seo_metadata: "read",
-      wordpress_update_seo_metadata: "write",
-      wordpress_seo_fix: "write",
-      wordpress_search_content: "read",
-      wordpress_get_content: "read",
-      wordpress_create_content: "write",
-      wordpress_update_content: "write",
-      wordpress_preview_content_update: "read",
-      wordpress_delete_content: "delete",
-      wordpress_list_comments: "read",
-      wordpress_get_comment: "read",
-      wordpress_moderate_comment: "write",
-      wordpress_list_terms: "read",
-      wordpress_list_media: "read",
-      wordpress_get_media: "read",
-      wordpress_upload_media: "write",
-    };
-
-    for (const [name, access] of Object.entries(expected)) {
+    for (const [name, access] of Object.entries(EXPECTED_TOOL_ACCESS)) {
       expect(getToolAccess(name)).toBe(access);
     }
+
+    expect(Object.keys(EXPECTED_TOOL_ACCESS).length).toBe(42);
   });
 });

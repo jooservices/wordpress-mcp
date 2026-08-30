@@ -79,7 +79,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "wordpress-mcp",
-    version: "1.3.0",
+    version: "1.4.0",
     authMode: config.mcpAuthMode,
     sites: siteRegistry.listSites(),
     protocolVersions: SUPPORTED_PROTOCOL_VERSIONS,

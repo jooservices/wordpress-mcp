@@ -35,7 +35,7 @@ Or use the Docker dev stack (`make up`) which mounts the plugin automatically.
 | `comments.moderate` | Approve/hold/spam |
 | `terms.read` | List categories/tags/taxonomies |
 | `media.read` | List media metadata |
-| `media.upload` | Upload files (base64). Check `wordpress_get_site_limits` for the site's real upload ceiling — WordPress's PHP limits are authoritative, not MCP's |
+| `media.upload` | Upload files (base64). Check `wordpress_get_site` for the site's real upload ceiling — WordPress's PHP limits are authoritative, not MCP's |
 | `media.embed` | Use an existing image in featured media, post/page content, or a gallery; requires edit permission for every attachment used |
 | `media.update` / `media.delete` | Update media metadata or permanently delete media |
 | `plugins.read/install/activate/deactivate/update/delete` | Granular plugin management; install is WordPress.org slug-only and each mutation requires confirmation |
@@ -80,4 +80,4 @@ WordPress revisions are created on content updates. Restore via wp-admin → pos
 
 ## Upgrade
 
-See [UPGRADING.md](UPGRADING.md) before moving an existing connector to v1.3.0. In particular, replace legacy `site.manage` grants with the specific scopes required by that connection; existing tokens do not receive new scopes automatically.
+See [UPGRADING.md](UPGRADING.md) before moving an existing connector to v1.4.0. In particular, update MCP client prompts and automations that call renamed or consolidated tools (see the v1.4.0 tool migration table).
