@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOOservices\WordPressMcp\Services;
 
 use JOOservices\WordPressMcp\Support\ContentNormalizer;
+use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Post;
 use WP_Query;
@@ -100,7 +101,12 @@ final class ContentService
      */
     public function create(array $data, bool $canPublish): array
     {
-        $type = sanitize_key((string) ($data['type'] ?? 'post'));
+        $type = ContentTypes::normalize(sanitize_key((string) ($data['type'] ?? ContentTypes::POST)), ContentTypes::POST);
+
+        if ($type === null) {
+            return ['post' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
+        }
+
         $status = sanitize_key((string) ($data['status'] ?? 'draft'));
 
         if ($status === 'publish' && ! $canPublish) {

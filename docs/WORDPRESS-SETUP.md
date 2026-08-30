@@ -31,6 +31,7 @@ Or use the Docker dev stack (`make up`) which mounts the plugin automatically.
 | `posts.delete` / `pages.delete` | Delete (trash by default; `force` for permanent) |
 | `comments.read` | List comments |
 | `comments.moderate` | Approve/hold/spam |
+| `terms.read` | List categories/tags/taxonomies |
 | `media.read` | List media metadata |
 | `media.upload` | Upload files (base64, max 10 MB decoded; MCP JSON body limit 15 MB) |
 

@@ -40,6 +40,7 @@ if (! defined('ABSPATH')) {
     </form>
 
     <h2>Existing connections</h2>
+    <p class="description">Revoke disables a token immediately but keeps the record for audit. Delete permanently removes revoked connections from the list.</p>
     <table class="widefat striped">
         <thead>
             <tr>
@@ -47,7 +48,7 @@ if (! defined('ABSPATH')) {
                 <th>Name</th>
                 <th>User</th>
                 <th>Scopes</th>
-                <th>Active</th>
+                <th>Status</th>
                 <th>Created</th>
                 <th>Last used</th>
                 <th>Actions</th>
@@ -55,20 +56,37 @@ if (! defined('ABSPATH')) {
         </thead>
         <tbody>
             <?php foreach ($connections as $row) : ?>
+                <?php
+                $isActive = (int) $row['active'] === 1;
+                $scopeList = json_decode((string) ($row['scopes'] ?? '[]'), true);
+                $scopeList = is_array($scopeList) ? array_values(array_map(strval(...), $scopeList)) : [];
+                ?>
                 <tr>
                     <td><?php echo esc_html((string) $row['id']); ?></td>
                     <td><?php echo esc_html((string) $row['name']); ?></td>
                     <td><?php echo esc_html((string) get_userdata((int) $row['user_id'])?->display_name); ?></td>
-                    <td><code><?php echo esc_html((string) $row['scopes']); ?></code></td>
-                    <td><?php echo (int) $row['active'] === 1 ? 'Yes' : 'No'; ?></td>
+                    <td><code><?php echo esc_html(implode(', ', $scopeList)); ?></code></td>
+                    <td>
+                        <?php if ($isActive) : ?>
+                            <strong style="color:#007017;">Active</strong>
+                        <?php else : ?>
+                            <strong style="color:#8a2424;">Revoked</strong>
+                        <?php endif; ?>
+                    </td>
                     <td><?php echo esc_html((string) $row['created_at']); ?></td>
                     <td><?php echo esc_html((string) ($row['last_used_at'] ?? '—')); ?></td>
                     <td>
-                        <?php if ((int) $row['active'] === 1) : ?>
+                        <?php if ($isActive) : ?>
                             <form method="post" style="display:inline;">
                                 <?php wp_nonce_field('chatgpt_connector', 'chatgpt_nonce'); ?>
                                 <input type="hidden" name="connection_id" value="<?php echo esc_attr((string) $row['id']); ?>">
-                                <button type="submit" name="revoke_connection" class="button" onclick="return confirm('Revoke this connection?');">Revoke</button>
+                                <button type="submit" name="revoke_connection" class="button" onclick="return confirm('Revoke this connection? The token will stop working immediately.');">Revoke</button>
+                            </form>
+                        <?php else : ?>
+                            <form method="post" style="display:inline;">
+                                <?php wp_nonce_field('chatgpt_connector', 'chatgpt_nonce'); ?>
+                                <input type="hidden" name="connection_id" value="<?php echo esc_attr((string) $row['id']); ?>">
+                                <button type="submit" name="delete_connection" class="button button-link-delete" onclick="return confirm('Permanently delete this revoked connection?');">Delete permanently</button>
                             </form>
                         <?php endif; ?>
                     </td>

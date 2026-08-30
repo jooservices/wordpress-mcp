@@ -39,7 +39,7 @@ final class AdminMenu
         }
 
         $this->handlePostActions();
-        $connections = $this->fetchConnections();
+        $connections = (new ConnectionManager())->listAll();
         $scopes = ScopeChecker::ALL_SCOPES;
         $newToken = get_transient('chatgpt_new_token_' . get_current_user_id());
 
@@ -84,7 +84,11 @@ final class AdminMenu
         }
 
         if (isset($_POST['revoke_connection'])) {
-            $this->revokeConnection((int) $_POST['connection_id']);
+            (new ConnectionManager())->revoke((int) $_POST['connection_id']);
+        }
+
+        if (isset($_POST['delete_connection'])) {
+            (new ConnectionManager())->deleteRevoked((int) $_POST['connection_id']);
         }
     }
 
@@ -119,30 +123,5 @@ final class AdminMenu
         );
 
         set_transient('chatgpt_new_token_' . get_current_user_id(), $token, 300);
-    }
-
-    private function revokeConnection(int $id): void
-    {
-        global $wpdb;
-
-        $wpdb->update(
-            Schema::connectionsTable(),
-            ['active' => 0],
-            ['id' => $id],
-            ['%d'],
-            ['%d'],
-        );
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function fetchConnections(): array
-    {
-        global $wpdb;
-
-        $rows = $wpdb->get_results('SELECT * FROM ' . Schema::connectionsTable() . ' ORDER BY id DESC', ARRAY_A);
-
-        return is_array($rows) ? $rows : [];
     }
 }

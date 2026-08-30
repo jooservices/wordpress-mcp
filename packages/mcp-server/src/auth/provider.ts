@@ -1,40 +1,46 @@
 import { randomUUID } from "node:crypto";
 import type { Response } from "express";
 import type { OAuthServerProvider, AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import type { OAuthClientInformationFull, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
+import type { OAuthClientInformationFull, OAuthTokenRevocationRequest, OAuthTokens } from "@modelcontextprotocol/sdk/shared/auth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { InvalidRequestError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { OAUTH_SCOPES } from "./types.js";
+import { FileOAuthStore } from "./store.js";
 
-type StoredCode = {
-  client: OAuthClientInformationFull;
-  params: AuthorizationParams;
-};
+function redirectUriRegistered(client: OAuthClientInformationFull, redirectUri: string): boolean {
+  return client.redirect_uris.some((uri) => String(uri) === redirectUri);
+}
 
-type StoredToken = {
-  token: string;
-  clientId: string;
-  scopes: string[];
-  expiresAt: number;
-  resource?: URL;
-};
+function resolveScopes(requested: string[] | undefined): string[] {
+  if (requested?.length) {
+    return requested;
+  }
+
+  return [OAUTH_SCOPES.READ, OAUTH_SCOPES.WRITE];
+}
+
+function filterRefreshScopes(requested: string[] | undefined, allowed: string[]): string[] {
+  if (!requested?.length) {
+    return allowed;
+  }
+
+  return requested.filter((scope) => allowed.includes(scope));
+}
 
 /**
  * Built-in OAuth authorization server for single-instance Docker deployments.
  * Auto-approves ChatGPT connector linking (no interactive login page).
  */
 export class WordPressOAuthProvider implements OAuthServerProvider {
-  private readonly clientStore = new InMemoryClientStore();
-
   get clientsStore() {
-    return this.clientStore;
+    return this.store;
   }
-  private readonly codes = new Map<string, StoredCode>();
-  private readonly tokens = new Map<string, StoredToken>();
 
   constructor(
+    private readonly store: FileOAuthStore,
     private readonly validateResource?: (resource: URL | undefined) => boolean,
     private readonly tokenTtlSeconds = 3600,
+    private readonly refreshTtlSeconds = 7_776_000,
   ) {}
 
   async authorize(
@@ -42,7 +48,7 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response,
   ): Promise<void> {
-    if (!client.redirect_uris.includes(params.redirectUri)) {
+    if (!redirectUriRegistered(client, params.redirectUri)) {
       throw new InvalidRequestError("Unregistered redirect_uri");
     }
 
@@ -51,7 +57,11 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
     }
 
     const code = randomUUID();
-    this.codes.set(code, { client, params });
+    await this.store.saveAuthCode(code, {
+      client,
+      params,
+      createdAt: Date.now(),
+    });
 
     const target = new URL(params.redirectUri);
     target.searchParams.set("code", code);
@@ -63,7 +73,7 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
   }
 
   async challengeForAuthorizationCode(_client: OAuthClientInformationFull, authorizationCode: string): Promise<string> {
-    const codeData = this.codes.get(authorizationCode);
+    const codeData = await this.store.getAuthCode(authorizationCode);
     if (!codeData) {
       throw new Error("Invalid authorization code");
     }
@@ -78,7 +88,7 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
     _redirectUri?: string,
     _resource?: URL,
   ): Promise<OAuthTokens> {
-    const codeData = this.codes.get(authorizationCode);
+    const codeData = await this.store.consumeAuthCode(authorizationCode);
     if (!codeData) {
       throw new Error("Invalid authorization code");
     }
@@ -87,41 +97,36 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
       throw new Error("Authorization code was not issued to this client");
     }
 
-    this.codes.delete(authorizationCode);
-
-    const token = randomUUID();
-    const scopes = codeData.params.scopes?.length
-      ? codeData.params.scopes
-      : [OAUTH_SCOPES.READ, OAUTH_SCOPES.WRITE];
-
-    this.tokens.set(token, {
-      token,
-      clientId: client.client_id,
-      scopes,
-      expiresAt: Date.now() + this.tokenTtlSeconds * 1000,
-      resource: codeData.params.resource,
-    });
-
-    return {
-      access_token: token,
-      token_type: "bearer",
-      expires_in: this.tokenTtlSeconds,
-      scope: scopes.join(" "),
-    };
+    const scopes = resolveScopes(codeData.params.scopes);
+    return this.issueTokens(client.client_id, scopes, codeData.params.resource);
   }
 
   async exchangeRefreshToken(
-    _client: OAuthClientInformationFull,
-    _refreshToken: string,
-    _scopes?: string[],
+    client: OAuthClientInformationFull,
+    refreshToken: string,
+    scopes?: string[],
     _resource?: URL,
   ): Promise<OAuthTokens> {
-    throw new Error("Refresh tokens are not supported in v1.0.0");
+    const stored = await this.store.getRefreshToken(refreshToken);
+    if (!stored) {
+      throw new Error("Invalid or expired refresh token");
+    }
+
+    if (stored.clientId !== client.client_id) {
+      throw new Error("Refresh token was not issued to this client");
+    }
+
+    await this.store.deleteRefreshToken(refreshToken);
+
+    const nextScopes = filterRefreshScopes(scopes, stored.scopes);
+    const resource = stored.resource ? new URL(stored.resource) : undefined;
+
+    return this.issueTokens(client.client_id, nextScopes, resource);
   }
 
   async verifyAccessToken(token: string): Promise<AuthInfo> {
-    const tokenData = this.tokens.get(token);
-    if (!tokenData || tokenData.expiresAt < Date.now()) {
+    const tokenData = await this.store.getAccessToken(token);
+    if (!tokenData) {
       throw new Error("Invalid or expired token");
     }
 
@@ -130,20 +135,74 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
       clientId: tokenData.clientId,
       scopes: tokenData.scopes,
       expiresAt: Math.floor(tokenData.expiresAt / 1000),
-      resource: tokenData.resource,
+      resource: tokenData.resource ? new URL(tokenData.resource) : undefined,
+    };
+  }
+
+  async revokeToken(_client: OAuthClientInformationFull, request: OAuthTokenRevocationRequest): Promise<void> {
+    if (request.token_type_hint === "refresh_token") {
+      await this.store.deleteRefreshToken(request.token);
+      return;
+    }
+
+    if (request.token_type_hint === "access_token") {
+      await this.store.deleteAccessToken(request.token);
+      return;
+    }
+
+    const refreshToken = await this.store.getRefreshToken(request.token);
+    if (refreshToken) {
+      await this.store.deleteRefreshToken(request.token);
+      return;
+    }
+
+    await this.store.deleteAccessToken(request.token);
+  }
+
+  private async issueTokens(clientId: string, scopes: string[], resource?: URL): Promise<OAuthTokens> {
+    const accessToken = randomUUID();
+    const refreshToken = randomUUID();
+    const now = Date.now();
+    const resourceValue = resource?.href;
+
+    await this.store.saveAccessToken({
+      token: accessToken,
+      clientId,
+      scopes,
+      expiresAt: now + this.tokenTtlSeconds * 1000,
+      resource: resourceValue,
+    });
+
+    await this.store.saveRefreshToken({
+      token: refreshToken,
+      clientId,
+      scopes,
+      expiresAt: now + this.refreshTtlSeconds * 1000,
+      resource: resourceValue,
+    });
+
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      token_type: "bearer",
+      expires_in: this.tokenTtlSeconds,
+      scope: scopes.join(" "),
     };
   }
 }
 
-class InMemoryClientStore {
-  private readonly clients = new Map<string, OAuthClientInformationFull>();
+export function createOAuthProvider(options: {
+  dataDir: string;
+  validateResource?: (resource: URL | undefined) => boolean;
+  tokenTtlSeconds?: number;
+  refreshTtlSeconds?: number;
+}): WordPressOAuthProvider {
+  const store = new FileOAuthStore(options.dataDir);
 
-  async getClient(clientId: string): Promise<OAuthClientInformationFull | undefined> {
-    return this.clients.get(clientId);
-  }
-
-  async registerClient(clientMetadata: OAuthClientInformationFull): Promise<OAuthClientInformationFull> {
-    this.clients.set(clientMetadata.client_id, clientMetadata);
-    return clientMetadata;
-  }
+  return new WordPressOAuthProvider(
+    store,
+    options.validateResource,
+    options.tokenTtlSeconds,
+    options.refreshTtlSeconds,
+  );
 }

@@ -29,7 +29,8 @@ Comment API responses exclude author email addresses (PII minimization).
 
 ## Known limitations (v1.0.0)
 
-- Built-in OAuth uses in-memory tokens (single-instance; restart clears sessions)
+- Built-in OAuth persists clients and tokens to `OAUTH_DATA_DIR` (default `/app/data/oauth`); mount a Docker volume in production
+- Access tokens expire per `OAUTH_TOKEN_TTL_SECONDS`; ChatGPT refreshes silently via `refresh_token` (TTL: `OAUTH_REFRESH_TTL_SECONDS`, default 90 days)
 - External IdP (Auth0, etc.) can replace built-in AS in a future release
 - Prompt injection possible via post content returned to the model
 - Rate limiting is per-connection, transient-based (single-node WordPress)
