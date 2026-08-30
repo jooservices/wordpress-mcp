@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OAuth refresh tokens with rotation and persistent client/token storage (`OAUTH_DATA_DIR` Docker volume)
+- WordPress `terms.read` scope for taxonomy listing
+- Permanent delete action for revoked connections in wp-admin
+- `ConnectionManager` for revoke/delete with audit logging
+
+### Changed
+
+- Revoked connections show **Revoked** status with **Delete permanently** (revoke keeps audit record; delete removes row)
+- Page scopes now map to WordPress page capabilities (`edit_pages`, `publish_pages`, `delete_pages`)
+- Content create/read/update/delete restricted to `post` and `page` types only
+- `/terms` requires `terms.read` instead of `posts.read`
+- `media.read` accepts users with `upload_files` or `read` capability
+
+### Fixed
+
+- ChatGPT OAuth reconnect failures after token expiry or server restart (`invalid_client`)
+- Content lookup returns 404 before scope checks when ID does not exist
+- `make prod-up` no longer requires `MCP_DOMAIN` / `ACME_EMAIL` when not using the Caddy HTTPS profile
+
 ## [1.0.0] - 2026-08-29
 
 ### Added

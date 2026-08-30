@@ -12,6 +12,7 @@ use JOOservices\WordPressMcp\Services\CommentService;
 use JOOservices\WordPressMcp\Services\ContentService;
 use JOOservices\WordPressMcp\Services\MediaService;
 use JOOservices\WordPressMcp\Services\TaxonomyService;
+use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Error;
 use WP_REST_Request;
@@ -142,7 +143,11 @@ final class RestRegistrar
             return $connection;
         }
 
-        $type = sanitize_key((string) ($request->get_param('type') ?? 'post'));
+        $type = ContentTypes::normalize((string) ($request->get_param('type') ?? ContentTypes::POST));
+
+        if ($type === null) {
+            return RequestContext::invalid('Unsupported content type. Use post or page.');
+        }
 
         if (! $this->canReadType($connection, $type)) {
             return RequestContext::deny();
@@ -163,9 +168,18 @@ final class RestRegistrar
 
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        $type = $post instanceof \WP_Post ? $post->post_type : 'post';
 
-        if (! $this->canReadType($connection, $type)) {
+        if (! $post instanceof \WP_Post) {
+            $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        if (! ContentTypes::isSupported($post->post_type)) {
+            return RequestContext::invalid('Unsupported content type.');
+        }
+
+        if (! $this->canReadType($connection, $post->post_type)) {
             return RequestContext::deny();
         }
 
@@ -189,18 +203,25 @@ final class RestRegistrar
             return $connection;
         }
 
-        $type = sanitize_key((string) ($request->get_param('type') ?? 'post'));
-        $scope = $type === 'page' ? 'pages.create' : 'posts.create';
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $requestedType = (string) ($request->get_param('type') ?? ($payload['type'] ?? ContentTypes::POST));
+        $type = ContentTypes::normalize($requestedType);
+
+        if ($type === null) {
+            return RequestContext::invalid('Unsupported content type. Use post or page.');
+        }
+
+        $scope = $type === ContentTypes::PAGE ? 'pages.create' : 'posts.create';
 
         if (! ScopeChecker::canCreateContent($connection, $type) || ! ScopeChecker::userCan($connection, $scope)) {
             return RequestContext::deny();
         }
 
         $canPublish = ScopeChecker::canPublishContent($connection, $type)
-            && ScopeChecker::userCan($connection, $type === 'page' ? 'pages.publish' : 'posts.publish');
+            && ScopeChecker::userCan($connection, $type === ContentTypes::PAGE ? 'pages.publish' : 'posts.publish');
 
-        $params = $request->get_json_params();
-        $payload = is_array($params) ? $params : [];
+        $payload['type'] = $type;
 
         $service = new ContentService();
         $result = $service->create($payload, $canPublish);
@@ -228,15 +249,26 @@ final class RestRegistrar
 
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        $type = $post instanceof \WP_Post ? $post->post_type : 'post';
-        $scope = $type === 'page' ? 'pages.update' : 'posts.update';
+
+        if (! $post instanceof \WP_Post) {
+            $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        if (! ContentTypes::isSupported($post->post_type)) {
+            return RequestContext::invalid('Unsupported content type.');
+        }
+
+        $type = $post->post_type;
+        $scope = $type === ContentTypes::PAGE ? 'pages.update' : 'posts.update';
 
         if (! ScopeChecker::canUpdateContent($connection, $type) || ! ScopeChecker::userCan($connection, $scope)) {
             return RequestContext::deny();
         }
 
         $canPublish = ScopeChecker::canPublishContent($connection, $type)
-            && ScopeChecker::userCan($connection, $type === 'page' ? 'pages.publish' : 'posts.publish');
+            && ScopeChecker::userCan($connection, $type === ContentTypes::PAGE ? 'pages.publish' : 'posts.publish');
 
         $params = $request->get_json_params();
         $payload = is_array($params) ? $params : [];
@@ -268,8 +300,19 @@ final class RestRegistrar
 
         $id = (int) $request->get_param('id');
         $post = get_post($id);
-        $type = $post instanceof \WP_Post ? $post->post_type : 'post';
-        $scope = $type === 'page' ? 'pages.delete' : 'posts.delete';
+
+        if (! $post instanceof \WP_Post) {
+            $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        if (! ContentTypes::isSupported($post->post_type)) {
+            return RequestContext::invalid('Unsupported content type.');
+        }
+
+        $type = $post->post_type;
+        $scope = $type === ContentTypes::PAGE ? 'pages.delete' : 'posts.delete';
 
         if (! ScopeChecker::canDeleteContent($connection, $type) || ! ScopeChecker::userCan($connection, $scope)) {
             return RequestContext::deny();
@@ -375,7 +418,7 @@ final class RestRegistrar
             return $connection;
         }
 
-        if (! ScopeChecker::userCan($connection, 'posts.read')) {
+        if (! ScopeChecker::canReadTerms($connection) || ! ScopeChecker::userCan($connection, 'terms.read')) {
             return RequestContext::deny();
         }
 
@@ -390,7 +433,7 @@ final class RestRegistrar
             return $connection;
         }
 
-        if (! ScopeChecker::userCan($connection, 'media.read')) {
+        if (! ScopeChecker::canReadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.read')) {
             return RequestContext::deny();
         }
 
@@ -436,7 +479,7 @@ final class RestRegistrar
             return $connection;
         }
 
-        if (! ScopeChecker::userCan($connection, 'media.read')) {
+        if (! ScopeChecker::canReadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.read')) {
             return RequestContext::deny();
         }
 
@@ -468,7 +511,11 @@ final class RestRegistrar
             return false;
         }
 
-        $scope = $type === 'page' ? 'pages.read' : 'posts.read';
+        if (! ContentTypes::isSupported($type)) {
+            return false;
+        }
+
+        $scope = $type === ContentTypes::PAGE ? 'pages.read' : 'posts.read';
 
         return ScopeChecker::canReadContent($connection, $type)
             && ScopeChecker::userCan($connection, $scope);

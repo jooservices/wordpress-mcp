@@ -25,16 +25,28 @@ make prod-up
 With HTTPS (Caddy + Let's Encrypt):
 
 ```bash
-# Set MCP_DOMAIN and ACME_EMAIL in .env.prod
+# In .env.prod set MCP_DOMAIN (hostname) and ACME_EMAIL (Let's Encrypt contact)
 make prod-https
 ```
 
 With ngrok tunnel (dev/testing only):
 
 ```bash
-# Set NGROK_AUTHTOKEN and MCP_PUBLIC_URL to your ngrok URL
+# In .env.prod set NGROK_AUTHTOKEN and MCP_PUBLIC_URL to your ngrok URL
 make prod-tunnel
 ```
+
+### Optional profile variables
+
+Docker Compose reads the whole `docker-compose.prod.yml` file even when a profile is inactive. **`MCP_DOMAIN`, `ACME_EMAIL`, and `NGROK_AUTHTOKEN` are not required for plain `make prod-up`.** Set them only when you use the matching `make` target.
+
+| Variable | Used by | What it is |
+|----------|---------|------------|
+| `MCP_DOMAIN` | `make prod-https` | Public DNS hostname for this MCP server (e.g. `mcp.example.com`). Must match the host in `MCP_PUBLIC_URL`. Caddy uses it as the site name and requests a Let's Encrypt certificate for it. |
+| `ACME_EMAIL` | `make prod-https` | Contact email passed to Let's Encrypt (ACME) for certificate expiry and account notices. Not used for login; any valid address you monitor is fine. |
+| `NGROK_AUTHTOKEN` | `make prod-tunnel` | API token from [ngrok dashboard](https://dashboard.ngrok.com/get-started/your-authtoken). Required only for the tunnel profile that exposes local MCP via ngrok. |
+
+If you already terminate HTTPS with **nginx**, a **cloud load balancer**, or **Cloudflare**, use `make prod-up` only, set `MCP_PUBLIC_URL` to your public HTTPS URL, and point your proxy at `MCP_PUBLISH` (default `127.0.0.1:3000`). You do **not** need `MCP_DOMAIN` or `ACME_EMAIL` unless you use the built-in Caddy profile.
 
 Or build manually:
 
@@ -77,17 +89,25 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_AUTH_SECRET` | Yes*** | Bearer token for MCP clients (only when `MCP_AUTH_MODE=static`) |
 | `MCP_AUTH_DISABLED` | No | Default `false`. Dev-only when ChatGPT uses No Auth |
 | `OAUTH_ISSUER_URL` | No | Defaults to `MCP_PUBLIC_URL` origin |
-| `OAUTH_TOKEN_TTL_SECONDS` | No | Default `3600` |
+| `OAUTH_TOKEN_TTL_SECONDS` | No | Default `3600` (access token; ChatGPT auto-refreshes) |
+| `OAUTH_REFRESH_TTL_SECONDS` | No | Default `7776000` (90 days) |
+| `OAUTH_DATA_DIR` | No | Default `/app/data/oauth` — mount a volume in production |
 | `MCP_PORT` | No | Default `3000` |
 | `MCP_HOST` | No | Default `0.0.0.0` |
 | `MCP_PUBLISH` | No | Host port mapping (default `127.0.0.1:3000:3000`) |
-| `NGROK_AUTHTOKEN` | No | Only for `make prod-tunnel` |
+| `MCP_DOMAIN` | No**** | Public hostname for `make prod-https` (Caddy/Let's Encrypt) |
+| `ACME_EMAIL` | No**** | Let's Encrypt contact email for `make prod-https` |
+| `NGROK_AUTHTOKEN` | No***** | ngrok token for `make prod-tunnel` only |
 
 \* Set either `WORDPRESS_SITES` **or** `WORDPRESS_URL` + `WORDPRESS_CONNECTION_TOKEN`.
 
 \** Required when `MCP_AUTH_MODE` is `mixed` or `oauth`.
 
 \*** Required when `MCP_AUTH_MODE` is `static`.
+
+\**** Required when running `make prod-https` (not required for `make prod-up` behind your own reverse proxy).
+
+\***** Required when running `make prod-tunnel`.
 
 ## WordPress
 

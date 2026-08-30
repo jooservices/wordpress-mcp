@@ -68,8 +68,12 @@ prod-logs:
 
 prod-https:
 	@test -f .env.prod || (echo "Run: cp .env.prod.example .env.prod" && exit 1)
+	@set -a && . ./.env.prod && set +a && \
+		test -n "$$MCP_DOMAIN" || (echo "Set MCP_DOMAIN in .env.prod (public hostname for Let's Encrypt)" && exit 1)
 	$(PROD_COMPOSE) --profile https up -d --build
 
 prod-tunnel:
 	@test -f .env.prod || (echo "Run: cp .env.prod.example .env.prod" && exit 1)
+	@set -a && . ./.env.prod && set +a && \
+		test -n "$$NGROK_AUTHTOKEN" || (echo "Set NGROK_AUTHTOKEN in .env.prod (from https://dashboard.ngrok.com)" && exit 1)
 	$(PROD_COMPOSE) --profile tunnel up -d --build

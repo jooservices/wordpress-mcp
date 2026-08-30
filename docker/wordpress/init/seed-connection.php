@@ -41,6 +41,7 @@ $scopes = [
     'pages.publish',
     'comments.read',
     'comments.moderate',
+    'terms.read',
     'media.read',
 ];
 

@@ -29,7 +29,8 @@ make prod-up
 With HTTPS (Caddy + Let's Encrypt):
 
 ```bash
-# Set MCP_DOMAIN and ACME_EMAIL in .env.prod
+# .env.prod: MCP_DOMAIN=mcp.example.com, ACME_EMAIL=you@example.com
+# (only for make prod-https — not needed if you use nginx/Cloudflare/LB instead)
 make prod-https
 ```
 
@@ -81,4 +82,4 @@ Local stack uses `MCP_AUTH_MODE=static` for simple bearer testing.
 
 ## Refresh tools
 
-After MCP updates, recreate or refresh the connector in ChatGPT and start a new chat.
+After MCP updates that change tool schemas, refresh the connector in ChatGPT and start a new chat. OAuth sessions survive server restarts when `OAUTH_DATA_DIR` is on a persistent volume.
