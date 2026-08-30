@@ -8,6 +8,7 @@ use JOOservices\WordPressMcp\Audit\AuditLogger;
 use JOOservices\WordPressMcp\Auth\ConnectionAuthenticator;
 use JOOservices\WordPressMcp\Models\Connection;
 use JOOservices\WordPressMcp\RateLimit\RateLimiter;
+use JOOservices\WordPressMcp\RateLimit\RateLimitSettings;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Error;
 use WP_REST_Request;
@@ -78,9 +79,9 @@ final class RequestContext
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
-        $limiter = new RateLimiter();
+        $limiter = RateLimiter::fromSettings();
 
-        if (! $limiter->isAllowed($connection->id)) {
+        if (RateLimitSettings::isEnabled() && ! $limiter->isAllowed($connection->id)) {
             (new AuditLogger())->log($connection->id, self::requestId(), 'denied', 'auth', $route, false, [
                 'reason' => 'rate_limited',
             ]);

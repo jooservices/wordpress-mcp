@@ -66,6 +66,9 @@ function getServer() {
 }
 
 const app = express();
+if (config.trustProxy) {
+  app.set("trust proxy", true);
+}
 app.use(express.json({ limit: config.mcpJsonBodyLimit }));
 
 if (config.mcpAuthMode === "mixed" || config.mcpAuthMode === "oauth") {
@@ -76,7 +79,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "wordpress-mcp",
-    version: "1.2.0",
+    version: "1.2.1",
     authMode: config.mcpAuthMode,
     sites: siteRegistry.listSites(),
     protocolVersions: SUPPORTED_PROTOCOL_VERSIONS,

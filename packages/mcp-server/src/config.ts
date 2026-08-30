@@ -1,3 +1,4 @@
+import type { OAuthRateLimitConfig } from "./auth/oauthRateLimit.js";
 import type { AuthMode } from "./auth/types.js";
 import type { ProtocolVersionPolicy } from "./mcp/versionNegotiator.js";
 import { loadWordPressSites } from "./sites/loadSites.js";
@@ -13,6 +14,8 @@ export interface Config {
   oauthTokenTtlSeconds: number;
   oauthRefreshTtlSeconds: number;
   oauthDataDir: string;
+  oauthRateLimit: OAuthRateLimitConfig;
+  trustProxy: boolean;
   port: number;
   host: string;
   mcpDisabledTools: Set<string>;
@@ -60,6 +63,45 @@ function parsePositiveInt(raw: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
+function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined || raw.trim() === "") {
+    return fallback;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes") {
+    return true;
+  }
+
+  if (normalized === "0" || normalized === "false" || normalized === "no") {
+    return false;
+  }
+
+  return fallback;
+}
+
+function parseOAuthRateLimit(): OAuthRateLimitConfig {
+  return {
+    enabled: parseBoolean(process.env.MCP_OAUTH_RATE_LIMIT_ENABLED, true),
+    register: {
+      max: parsePositiveInt(process.env.MCP_OAUTH_REGISTER_MAX, 20),
+      windowMs: parsePositiveInt(process.env.MCP_OAUTH_REGISTER_WINDOW_MS, 60 * 60 * 1000),
+    },
+    token: {
+      max: parsePositiveInt(process.env.MCP_OAUTH_TOKEN_MAX, 50),
+      windowMs: parsePositiveInt(process.env.MCP_OAUTH_TOKEN_WINDOW_MS, 15 * 60 * 1000),
+    },
+    authorize: {
+      max: parsePositiveInt(process.env.MCP_OAUTH_AUTHORIZE_MAX, 100),
+      windowMs: parsePositiveInt(process.env.MCP_OAUTH_AUTHORIZE_WINDOW_MS, 15 * 60 * 1000),
+    },
+    revoke: {
+      max: parsePositiveInt(process.env.MCP_OAUTH_REVOKE_MAX, 50),
+      windowMs: parsePositiveInt(process.env.MCP_OAUTH_REVOKE_WINDOW_MS, 15 * 60 * 1000),
+    },
+  };
+}
+
 export function loadConfig(): Config {
   const sites = loadWordPressSites();
   const mcpAuthDisabled =
@@ -87,6 +129,8 @@ export function loadConfig(): Config {
     oauthTokenTtlSeconds: Number(process.env.OAUTH_TOKEN_TTL_SECONDS ?? 3600),
     oauthRefreshTtlSeconds: Number(process.env.OAUTH_REFRESH_TTL_SECONDS ?? 7_776_000),
     oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
+    oauthRateLimit: parseOAuthRateLimit(),
+    trustProxy: parseBoolean(process.env.MCP_TRUST_PROXY, true),
     port: Number(process.env.MCP_PORT ?? 3000),
     host: process.env.MCP_HOST ?? "0.0.0.0",
     mcpDisabledTools: parseDisabledTools(process.env.MCP_DISABLED_TOOLS),
