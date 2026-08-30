@@ -3,7 +3,7 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.2.1-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
@@ -12,11 +12,11 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.2.1
+## About v1.3.0
 
 | | |
 | --- | --- |
-| Status | **v1.2.1 — configurable OAuth + REST rate limits, reverse-proxy-aware OAuth throttling** |
+| Status | **v1.3.0 — scoped WordPress site management** |
 | Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
 | Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
@@ -34,7 +34,7 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 **MCP server**
 
 - One MCP server → one or many WordPress sites (`WORDPRESS_SITES`)
-- 25 purpose-built tools (site registry, content, comments, terms, media, SEO, request observability)
+- 50 purpose-built tools (content, media, plugins/themes, users, settings, health, maintenance, revisions, redirects, SEO, observability)
 - WordPress entities browsable as MCP resources (`wordpress://sites|content|comments|media|terms`)
 - Safety gates: publish transitions, deletion, robots.txt updates, and SEO metadata writes require `confirm: true`; preview diffs with `wordpress_preview_content_update`
 - Semantic search: filter by author name, category/tag slug, and custom field
@@ -99,10 +99,18 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | `wordpress_list_sites` | Read |
 | `wordpress_set_active_site` | Read (session default for `site`) |
 | `wordpress_get_site` | Read |
+| `wordpress_list_plugins` | Read (`plugins.read`) |
+| `wordpress_install_plugin` | Write (WordPress.org slug; `confirm: true`) |
+| `wordpress_activate_plugin` | Write (`confirm: true`) |
+| `wordpress_deactivate_plugin` | Write (`confirm: true`) |
+| `wordpress_update_plugin` | Write (`confirm: true`) |
+| `wordpress_delete_plugin` | Delete (`confirm: true`; must be inactive) |
+| `wordpress_list_themes` / `wordpress_install_theme` / `wordpress_activate_theme` / `wordpress_update_theme` / `wordpress_delete_theme` | Theme management (mutations require `confirm: true`) |
+| `wordpress_list_users` / `wordpress_create_user` / `wordpress_update_user` / `wordpress_delete_user` | User management (mutations require `confirm: true`) |
 | `wordpress_search_content` | Read |
 | `wordpress_get_content` | Read |
-| `wordpress_create_content` | Write (draft default) |
-| `wordpress_update_content` | Write (`confirm: true` required to publish) |
+| `wordpress_create_content` | Write (draft default; `featured_media` requires `media.embed`) |
+| `wordpress_update_content` | Write (`confirm: true` required to publish; `featured_media` requires `media.embed`; `0` removes it) |
 | `wordpress_preview_content_update` | Read (diff preview before update) |
 | `wordpress_delete_content` | Write (trash by default; `force` for permanent; `confirm: true` required) |
 | `wordpress_list_comments` | Read |
@@ -112,6 +120,10 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | `wordpress_list_media` | Read |
 | `wordpress_get_media` | Read |
 | `wordpress_upload_media` | Write (base64; check `wordpress_get_site_limits` for the real ceiling) |
+| `wordpress_update_media` | Write (`confirm: true`) |
+| `wordpress_delete_media` | Delete (`confirm: true`) |
+| `wordpress_get_site_settings` | Read (`settings.read`) |
+| `wordpress_update_site_settings` | Write (`settings.update`; `confirm: true`) |
 | `wordpress_get_site_limits` | Read (PHP upload/content limits) |
 | `wordpress_get_mcp_stats` | Read (request counts, success/error, latency) |
 | `wordpress_get_mcp_request_log` | Read (paginated audit log) |
@@ -121,6 +133,10 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | `wordpress_get_seo_metadata` | Read |
 | `wordpress_update_seo_metadata` | Write (`confirm: true` required) |
 | `wordpress_seo_fix` | Write (`confirm: true` required) |
+| `wordpress_get_site_health` / `wordpress_get_update_status` | Read site health and update availability |
+| `wordpress_set_maintenance_mode` / `wordpress_update_core` | Write (`confirm: true`) |
+| `wordpress_list_revisions` / `wordpress_restore_revision` | Read / write (`confirm: true`) |
+| `wordpress_list_redirects` / `wordpress_get_404_log` / `wordpress_upsert_redirect` / `wordpress_delete_redirect` | Redirect/404 operations; mutations require `confirm: true` |
 
 ## MCP resources
 
@@ -167,6 +183,7 @@ See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview |
 | [ADR-001](docs/ADR-001-integration-architecture.md) | Integration decision record |
 | [WORDPRESS-SETUP.md](docs/WORDPRESS-SETUP.md) | Plugin install |
+| [UPGRADING.md](docs/UPGRADING.md) | Upgrade and rollback guide |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | MCP server deploy |
 | [CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md) | ChatGPT connector |
 | [OAUTH-EXPLAINED.md](docs/OAUTH-EXPLAINED.md) | OAuth vs. WordPress connection scopes explained |

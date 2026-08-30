@@ -25,6 +25,7 @@ const draftContent = {
   author: { id: 1, name: "Admin" },
   categories: [{ id: 3, name: "News", slug: "news" }],
   tags: [{ id: 9, name: "Featured", slug: "featured" }],
+  featured_media: 17,
   internal_secret: "must never leak",
 };
 
@@ -37,6 +38,9 @@ const publishedContent = {
 };
 
 let robotsContent = "User-agent: *\nDisallow:\n";
+const plugins = [
+  { plugin: "akismet/akismet.php", name: "Akismet", version: "5.3", active: true, update_available: false, internal_secret: "no" },
+];
 let seoMetadata: Record<string, unknown> = {
   id: 42,
   provider: "core",
@@ -74,6 +78,11 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
     });
   }
 
+  if (rel === "/content" && method === "POST") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    return json({ ...draftContent, ...payload, id: 100, status: payload.status ?? "draft" }, 201);
+  }
+
   if (rel === "/content/42" && method === "GET") {
     return json(draftContent);
   }
@@ -100,6 +109,30 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
 
   if (rel === "/media" && method === "GET") {
     return json({ items: [], pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 } });
+  }
+
+  if (rel === "/plugins" && method === "GET") {
+    return json({ items: plugins });
+  }
+
+  if (rel === "/plugins/install" && method === "POST") {
+    return json({ plugin: "hello-dolly/hello.php", name: "Hello Dolly", version: "1.7.2", active: false, update_available: false });
+  }
+
+  if (rel === "/plugins/activate" && method === "POST") {
+    return json({ ...plugins[0], active: true });
+  }
+
+  if (rel === "/plugins/deactivate" && method === "POST") {
+    return json({ ...plugins[0], active: false });
+  }
+
+  if (rel === "/plugins/update" && method === "POST") {
+    return json({ ...plugins[0], version: "5.4" });
+  }
+
+  if (rel === "/plugins/delete" && method === "POST") {
+    return json({ deleted: true });
   }
 
   if (rel === "/terms" && method === "GET") {
@@ -300,6 +333,79 @@ describe("wordpress_preview_content_update", () => {
     const current = result.structuredContent?.current as Record<string, unknown>;
     expect(current).not.toHaveProperty("internal_secret");
     expect(current).toHaveProperty("title");
+  });
+});
+
+describe("featured media", () => {
+  it("forwards a featured image ID when creating content", async () => {
+    const result = await ctx.client.callTool({
+      name: "wordpress_create_content",
+      arguments: { site: "abc", title: "New post", featured_media: 18 },
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ site: "abc", id: 100, featured_media: 18 });
+  });
+
+  it("forwards a featured image ID when updating content and returns it in the DTO", async () => {
+    const result = await ctx.client.callTool({
+      name: "wordpress_update_content",
+      arguments: { site: "abc", id: 42, featured_media: 18 },
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ site: "abc", featured_media: 18 });
+  });
+
+  it("shows featured-image removal in the preview diff", async () => {
+    const result = await ctx.client.callTool({
+      name: "wordpress_preview_content_update",
+      arguments: { site: "abc", id: 42, featured_media: 0 },
+    });
+
+    expect(result.structuredContent?.changes).toEqual([{ field: "featured_media", from: 17, to: 0 }]);
+  });
+});
+
+describe("plugin management", () => {
+  it("lists plugins without leaking unlisted fields", async () => {
+    const result = await ctx.client.callTool({ name: "wordpress_list_plugins", arguments: { site: "abc" } });
+    const items = (result.structuredContent?.items ?? []) as Array<Record<string, unknown>>;
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ plugin: "akismet/akismet.php", active: true });
+    expect(items[0]).not.toHaveProperty("internal_secret");
+  });
+
+  it("requires confirmation before installing plugin code", async () => {
+    const result = await ctx.client.callTool({
+      name: "wordpress_install_plugin",
+      arguments: { site: "abc", slug: "hello-dolly" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ confirmation_required: true, action: "install", slug: "hello-dolly" });
+    expect(ctx.calls.some((call) => call.url.endsWith("/plugins/install"))).toBe(false);
+  });
+
+  it("installs a WordPress.org plugin after confirmation", async () => {
+    const result = await ctx.client.callTool({
+      name: "wordpress_install_plugin",
+      arguments: { site: "abc", slug: "hello-dolly", confirm: true },
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ plugin: "hello-dolly/hello.php", active: false });
+  });
+
+  it("requires confirmation before activating a plugin", async () => {
+    const result = await ctx.client.callTool({
+      name: "wordpress_activate_plugin",
+      arguments: { site: "abc", plugin: "akismet/akismet.php" },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({ confirmation_required: true, action: "activate" });
   });
 });
 

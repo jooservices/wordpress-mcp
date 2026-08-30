@@ -17,17 +17,26 @@ final class AdminMenu
     public function register(): void
     {
         add_menu_page(
-            'JOOservices WordPress - MCP',
-            'WordPress - MCP',
+            'JOOservices',
+            'JOOservices',
             'manage_options',
-            'chatgpt-connector',
-            [$this, 'renderConnections'],
-            'dashicons-admin-plugins',
+            'jooservices',
+            [$this, 'renderDashboard'],
+            'dashicons-admin-generic',
             80,
         );
 
         add_submenu_page(
+            'jooservices',
+            'MCP',
+            'MCP',
+            'manage_options',
             'chatgpt-connector',
+            [$this, 'renderConnections'],
+        );
+
+        add_submenu_page(
+            'jooservices',
             'Audit Log',
             'Audit Log',
             'manage_options',
@@ -36,13 +45,22 @@ final class AdminMenu
         );
 
         add_submenu_page(
-            'chatgpt-connector',
+            'jooservices',
             'Settings',
             'Settings',
             'manage_options',
             'chatgpt-settings',
             [$this, 'renderSettings'],
         );
+    }
+
+    public function renderDashboard(): void
+    {
+        if (! current_user_can('manage_options')) {
+            return;
+        }
+
+        include JOOSERVICES_WORDPRESS_MCP_PATH . 'templates/admin-dashboard.php';
     }
 
     public function registerPostHandlers(): void

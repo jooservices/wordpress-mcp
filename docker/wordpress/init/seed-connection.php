@@ -26,14 +26,9 @@ $existing = $wpdb->get_var(
     $wpdb->prepare("SELECT id FROM {$table} WHERE token_hash = %s LIMIT 1", $hash),
 );
 
-if ($existing) {
-    echo "Dev connection already exists (id={$existing})\n";
-
-    return;
-}
-
 $scopes = [
     'site.read',
+    'seo.robots.update',
     'posts.read',
     'posts.create',
     'posts.update',
@@ -46,7 +41,43 @@ $scopes = [
     'comments.moderate',
     'terms.read',
     'media.read',
+    'media.upload',
+    'media.embed',
+    'media.update',
+    'media.delete',
+    'settings.read',
+    'settings.update',
+    'plugins.read',
+    'plugins.install',
+    'plugins.activate',
+    'plugins.deactivate',
+    'plugins.update',
+    'plugins.delete',
+    'themes.read',
+    'themes.install',
+    'themes.activate',
+    'themes.update',
+    'themes.delete',
+    'users.read',
+    'users.create',
+    'users.update',
+    'users.assign_roles',
+    'users.delete',
 ];
+
+if ($existing) {
+    $wpdb->update(
+        $table,
+        ['scopes' => wp_json_encode($scopes)],
+        ['id' => (int) $existing],
+        ['%s'],
+        ['%d'],
+    );
+
+    echo "Updated dev connection scopes (id={$existing})\n";
+
+    return;
+}
 
 $admin = get_user_by('login', 'admin');
 $userId = $admin instanceof WP_User ? (int) $admin->ID : 1;

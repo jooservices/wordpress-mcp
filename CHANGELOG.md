@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-30
+
+### Added
+
+- `featured_media` support on `wordpress_create_content`, `wordpress_update_content`, and `wordpress_preview_content_update`: attach an uploaded image by media ID or pass `0` on update to remove it. Content responses now return the selected media ID for verification.
+- Full media lifecycle tools: update attachment metadata and permanently delete media.
+- WordPress.org-only plugin and theme management; granular user management and curated site settings.
+- Navigation menu REST management, Site Health, update status, maintenance mode, content revisions, redirects, and a capped 404 monitor.
+- MCP tools for plugins, themes, users, media, settings, health, update status, maintenance mode, core update, revisions, and redirects.
+
+### Security
+
+- Connector scopes are a second allowlist on top of WordPress capabilities and object-level permissions.
+- Featured images and WordPress media markup/galleries require `media.embed`, attachment edit permission, and a valid image attachment; uploading a new file remains `media.upload`.
+- Plugin/theme installs accept only official WordPress.org slugs. Code changes, user changes, settings, redirects, maintenance, restores, and core updates require MCP confirmation.
+
+### Fixed
+
+- Media uploads now accept WordPress's documented successful `wp_upload_bits()` result (`error: false`) instead of incorrectly returning `WORDPRESS_ERROR`.
+
 ## [1.2.1] - 2026-08-30
 
 ### Added
@@ -126,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.1...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.3.0...develop
+[1.3.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.0.0...v1.1.0

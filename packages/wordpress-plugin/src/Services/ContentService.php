@@ -161,6 +161,12 @@ final class ContentService
             $status = 'draft';
         }
 
+        $featuredMediaError = $this->validateFeaturedMedia($data);
+
+        if ($featuredMediaError !== null) {
+            return ['post' => null, 'error' => $featuredMediaError];
+        }
+
         $postId = wp_insert_post([
             'post_type' => $type,
             'post_title' => sanitize_text_field((string) ($data['title'] ?? '')),
@@ -175,6 +181,12 @@ final class ContentService
         }
 
         $this->assignTaxonomies((int) $postId, $data);
+
+        if (! $this->applyFeaturedMedia((int) $postId, $data)) {
+            wp_delete_post((int) $postId, true);
+
+            return ['post' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
+        }
 
         $post = get_post((int) $postId);
 
@@ -191,6 +203,12 @@ final class ContentService
 
         if (! $post instanceof WP_Post) {
             return ['post' => null, 'error' => ErrorCodes::POST_NOT_FOUND];
+        }
+
+        $featuredMediaError = $this->validateFeaturedMedia($data);
+
+        if ($featuredMediaError !== null) {
+            return ['post' => null, 'error' => $featuredMediaError];
         }
 
         $update = ['ID' => $id];
@@ -230,6 +248,10 @@ final class ContentService
         }
 
         $this->assignTaxonomies($id, $data);
+
+        if (! $this->applyFeaturedMedia($id, $data)) {
+            return ['post' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
+        }
 
         $updated = get_post($id);
 
@@ -288,5 +310,59 @@ final class ContentService
         if (isset($data['tags']) && is_array($data['tags'])) {
             wp_set_post_tags($postId, array_map(strval(...), $data['tags']));
         }
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function validateFeaturedMedia(array $data): ?string
+    {
+        if (! array_key_exists('featured_media', $data)) {
+            return null;
+        }
+
+        $mediaId = $data['featured_media'];
+
+        if (! is_int($mediaId) || $mediaId < 0) {
+            return ErrorCodes::INVALID_ARGUMENT;
+        }
+
+        if ($mediaId === 0) {
+            return null;
+        }
+
+        $attachment = get_post($mediaId);
+
+        if (! $attachment instanceof WP_Post || $attachment->post_type !== 'attachment') {
+            return ErrorCodes::MEDIA_NOT_FOUND;
+        }
+
+        return wp_attachment_is_image($mediaId) ? null : ErrorCodes::INVALID_ARGUMENT;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function applyFeaturedMedia(int $postId, array $data): bool
+    {
+        if (! array_key_exists('featured_media', $data)) {
+            return true;
+        }
+
+        $mediaId = $data['featured_media'];
+
+        if (! is_int($mediaId)) {
+            return false;
+        }
+
+        $currentMediaId = (int) get_post_thumbnail_id($postId);
+
+        if ($currentMediaId === $mediaId) {
+            return true;
+        }
+
+        return (bool) ($mediaId === 0
+            ? delete_post_thumbnail($postId)
+            : set_post_thumbnail($postId, $mediaId));
     }
 }

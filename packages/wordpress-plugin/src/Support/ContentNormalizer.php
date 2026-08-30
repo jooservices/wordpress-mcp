@@ -36,6 +36,7 @@ final class ContentNormalizer
             'categories' => $this->terms($post, 'category'),
             'tags' => $this->terms($post, 'post_tag'),
             'created_at' => get_post_time('c', true, $post),
+            'featured_media' => (int) get_post_thumbnail_id($post),
         ]);
     }
 
