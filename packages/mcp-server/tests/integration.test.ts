@@ -20,6 +20,16 @@ describe.skipIf(!runIntegration)("integration", () => {
     expect(Array.isArray(body.items)).toBe(true);
   });
 
+  it("accepts semantic search filters (author/taxonomy/meta)", async () => {
+    const response = await fetch(
+      `${wordpressUrl}/wp-json/chatgpt-connector/v1/content?category_name=uncategorized&author_name=admin&per_page=5`,
+      { headers: { Authorization: `Bearer ${wpToken}` } },
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { items: unknown[] };
+    expect(Array.isArray(body.items)).toBe(true);
+  });
+
   it("denies WordPress API without token", async () => {
     const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/site`);
     expect(response.status).toBe(401);

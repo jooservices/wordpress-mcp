@@ -1,4 +1,5 @@
 import { normalizeWordPressError, WordPressApiError } from "../errors/normalize.js";
+import { getRequestId } from "../mcp/requestContext.js";
 import type { WordPressSiteCredentials } from "./types.js";
 
 export class WordPressClient {
@@ -47,12 +48,15 @@ export class WordPressClient {
   }
 
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
+    const requestId = getRequestId();
+
     const response = await fetch(url, {
       method,
       headers: {
         Authorization: `Bearer ${this.token}`,
         Accept: "application/json",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...(requestId ? { "X-Request-Id": requestId } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });

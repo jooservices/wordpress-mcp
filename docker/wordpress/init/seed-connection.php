@@ -1,6 +1,9 @@
 <?php
 
-declare(strict_types=1);
+// Note: this file is consumed by `wp eval-file`, which evaluates the file
+// content directly. Keep it free of `declare(strict_types=1)` (WP-CLI 2.12+
+// no longer strips the opening `<?php` tag, and strict_types must be the
+// first statement in an eval'd script).
 
 if (! defined('ABSPATH')) {
     exit("Run via wp eval-file\n");

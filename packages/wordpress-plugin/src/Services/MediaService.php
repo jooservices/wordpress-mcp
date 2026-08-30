@@ -9,6 +9,14 @@ use WP_Query;
 
 final class MediaService
 {
+    /** @var list<string> */
+    private const BLOCKED_EXTENSIONS = [
+        'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
+        'pht', 'phtm', 'shtml', 'cgi', 'pl', 'py', 'asp', 'aspx', 'jsp',
+        'js', 'mjs', 'html', 'htm', 'xhtml', 'svg', 'exe', 'bat', 'cmd',
+        'sh', 'bash', 'com', 'scr', 'vbs', 'htaccess',
+    ];
+
     /**
      * @param array<string, mixed> $params
      * @return array{items: list<array<string, mixed>>, pagination: array<string, int>}
@@ -69,6 +77,10 @@ final class MediaService
             return ['media' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
 
+        if (! $this->hasSafeExtension($fileName)) {
+            return ['media' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
+        }
+
         $maxBytes = 10 * 1024 * 1024;
 
         if (strlen($content) > $maxBytes) {
@@ -83,6 +95,12 @@ final class MediaService
 
         if ($upload['error'] !== '') {
             return ['media' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
+        }
+
+        if (! $this->matchesContentType($upload['file'], $fileName, $mimeType)) {
+            wp_delete_file($upload['file']);
+
+            return ['media' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
 
         $title = isset($data['title'])
@@ -127,5 +145,34 @@ final class MediaService
             'file_name' => basename((string) get_attached_file($id)),
             'created_at' => get_post_time('c', true, $id),
         ];
+    }
+
+    private function hasSafeExtension(string $fileName): bool
+    {
+        $extension = strtolower((string) pathinfo($fileName, PATHINFO_EXTENSION));
+
+        if ($extension === '') {
+            return false;
+        }
+
+        return ! in_array($extension, self::BLOCKED_EXTENSIONS, true);
+    }
+
+    private function matchesContentType(string $filePath, string $fileName, string $declaredMimeType): bool
+    {
+        $check = wp_check_filetype_and_ext($filePath, $fileName);
+
+        if ($check['ext'] === false || $check['type'] === false) {
+            return false;
+        }
+
+        if ($check['type'] === 'application/octet-stream') {
+            return $declaredMimeType === 'application/octet-stream';
+        }
+
+        [$detectedFamily] = explode('/', (string) $check['type'], 2);
+        [$declaredFamily] = explode('/', $declaredMimeType, 2);
+
+        return $detectedFamily !== '' && $detectedFamily === $declaredFamily;
     }
 }

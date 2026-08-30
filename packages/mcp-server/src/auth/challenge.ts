@@ -1,5 +1,3 @@
-import { WRITE_TOOLS } from "./types.js";
-
 export function authChallenge(
   message: string,
   resourceMetadataUrl: string,
@@ -18,8 +16,4 @@ export function authChallenge(
 
 export function hasOAuthScope(scopes: string[] | undefined, required: string): boolean {
   return scopes?.includes(required) ?? false;
-}
-
-export function isWriteTool(toolName: string): boolean {
-  return WRITE_TOOLS.has(toolName);
 }

@@ -9,6 +9,8 @@ use JOOservices\WordPressMcp\Models\Connection;
 
 final class ConnectionAuthenticator
 {
+    private const LAST_USED_THROTTLE_SECONDS = 60;
+
     private static ?Connection $current = null;
 
     public static function reset(): void
@@ -37,7 +39,7 @@ final class ConnectionAuthenticator
 
         self::$current = $connection;
         wp_set_current_user($connection->userId);
-        self::touchLastUsed($connection->id);
+        self::touchLastUsedIfStale($connection);
 
         return $connection;
     }
@@ -83,15 +85,23 @@ final class ConnectionAuthenticator
         return Connection::fromRow($row);
     }
 
-    private static function touchLastUsed(int $connectionId): void
+    private static function touchLastUsedIfStale(Connection $connection): void
     {
+        if ($connection->lastUsedAt !== null) {
+            $lastUsed = strtotime($connection->lastUsedAt . ' UTC');
+
+            if ($lastUsed !== false && (time() - $lastUsed) < self::LAST_USED_THROTTLE_SECONDS) {
+                return;
+            }
+        }
+
         global $wpdb;
 
         $table = Schema::connectionsTable();
         $wpdb->update(
             $table,
             ['last_used_at' => current_time('mysql', true)],
-            ['id' => $connectionId],
+            ['id' => $connection->id],
             ['%s'],
             ['%d'],
         );

@@ -11,6 +11,8 @@ use JOOservices\WordPressMcp\Models\Connection;
 use JOOservices\WordPressMcp\Services\CommentService;
 use JOOservices\WordPressMcp\Services\ContentService;
 use JOOservices\WordPressMcp\Services\MediaService;
+use JOOservices\WordPressMcp\Services\SeoService;
+use JOOservices\WordPressMcp\Services\StatsService;
 use JOOservices\WordPressMcp\Services\TaxonomyService;
 use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
@@ -27,6 +29,12 @@ final class RestRegistrar
         register_rest_route(self::NAMESPACE, '/site', [
             'methods' => 'GET',
             'callback' => [$this, 'site'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/site/limits', [
+            'methods' => 'GET',
+            'callback' => [$this, 'siteLimits'],
             'permission_callback' => [$this, 'authenticate'],
         ]);
 
@@ -104,11 +112,61 @@ final class RestRegistrar
             'callback' => [$this, 'getMedia'],
             'permission_callback' => [$this, 'authenticate'],
         ]);
+
+        register_rest_route(self::NAMESPACE, '/mcp/stats', [
+            'methods' => 'GET',
+            'callback' => [$this, 'mcpStats'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/mcp/logs', [
+            'methods' => 'GET',
+            'callback' => [$this, 'mcpLogs'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/seo/robots', [
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'getRobots'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'POST',
+                'callback' => [$this, 'updateRobots'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/seo/audit', [
+            'methods' => 'GET',
+            'callback' => [$this, 'seoAudit'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/seo/metadata/(?P<id>\d+)', [
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'getSeoMetadata'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'PATCH',
+                'callback' => [$this, 'updateSeoMetadata'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/seo/fix/(?P<id>\d+)', [
+            'methods' => 'POST',
+            'callback' => [$this, 'seoFix'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
     }
 
     public function authenticate(WP_REST_Request $request): bool|WP_Error
     {
-        RequestContext::reset();
+        RequestContext::reset($request);
         $result = RequestContext::requireConnection($request);
 
         return $result instanceof WP_Error ? $result : true;
@@ -116,6 +174,7 @@ final class RestRegistrar
 
     public function site(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -126,17 +185,71 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        return new WP_REST_Response([
+        $response = new WP_REST_Response([
             'name' => get_bloginfo('name'),
             'url' => home_url('/'),
             'wordpress_version' => get_bloginfo('version'),
             'timezone' => wp_timezone_string(),
             'supported_capabilities' => $connection->scopes,
         ]);
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'site',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return $response;
+    }
+
+    /**
+     * Reports the site's real PHP/WordPress size limits so MCP can stop
+     * pre-rejecting uploads/content at an arbitrary body-size cap — WordPress
+     * (and its host's php.ini) is the authoritative limit, not the MCP server.
+     */
+    public function siteLimits(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'site.read')) {
+            return RequestContext::deny();
+        }
+
+        $response = new WP_REST_Response([
+            'upload_max_filesize' => (string) ini_get('upload_max_filesize'),
+            'post_max_size' => (string) ini_get('post_max_size'),
+            'memory_limit' => (string) ini_get('memory_limit'),
+            'max_execution_time' => (string) ini_get('max_execution_time'),
+            'wp_max_upload_size_bytes' => (int) wp_max_upload_size(),
+        ]);
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'site_limits',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return $response;
     }
 
     public function searchContent(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -154,12 +267,25 @@ final class RestRegistrar
         }
 
         $service = new ContentService();
+        $result = $service->search($request->get_params());
 
-        return new WP_REST_Response($service->search($request->get_params()));
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            $type,
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
     }
 
     public function getContent(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -185,18 +311,42 @@ final class RestRegistrar
 
         $service = new ContentService();
         $item = $service->get($id);
+        $audit = new AuditLogger();
 
         if ($item === null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'read',
+                $post->post_type,
+                (string) $id,
+                false,
+                null,
+                $this->durationMs($startedAt),
+            );
+
             $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
+
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            $post->post_type,
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
 
         return new WP_REST_Response($item);
     }
 
     public function createContent(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -228,19 +378,38 @@ final class RestRegistrar
         $audit = new AuditLogger();
 
         if ($result['error'] !== null) {
-            $audit->log($connection->id, RequestContext::requestId(), 'create', $type, null, false, ['error' => $result['error']]);
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'create',
+                $type,
+                null,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
             $err = ErrorCodes::error($result['error'], 'Failed to create content.', 403);
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
-        $audit->log($connection->id, RequestContext::requestId(), 'create', $type, (string) ($result['post']['id'] ?? ''), true);
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'create',
+            $type,
+            (string) ($result['post']['id'] ?? ''),
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
 
         return new WP_REST_Response($result['post'], 201);
     }
 
     public function updateContent(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -278,20 +447,39 @@ final class RestRegistrar
         $audit = new AuditLogger();
 
         if ($result['error'] !== null) {
-            $audit->log($connection->id, RequestContext::requestId(), 'update', $type, (string) $id, false, ['error' => $result['error']]);
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'update',
+                $type,
+                (string) $id,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
             $status = $result['error'] === ErrorCodes::POST_NOT_FOUND ? 404 : 403;
             $err = ErrorCodes::error($result['error'], 'Failed to update content.', $status);
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
-        $audit->log($connection->id, RequestContext::requestId(), 'update', $type, (string) $id, true);
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'update',
+            $type,
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
 
         return new WP_REST_Response($result['post']);
     }
 
     public function deleteContent(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -324,20 +512,39 @@ final class RestRegistrar
         $audit = new AuditLogger();
 
         if ($result['error'] !== null) {
-            $audit->log($connection->id, RequestContext::requestId(), 'delete', $type, (string) $id, false, ['error' => $result['error']]);
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'delete',
+                $type,
+                (string) $id,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
             $status = $result['error'] === ErrorCodes::POST_NOT_FOUND ? 404 : 403;
             $err = ErrorCodes::error($result['error'], 'Failed to delete content.', $status);
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
-        $audit->log($connection->id, RequestContext::requestId(), 'delete', $type, (string) $id, true, ['force' => $force]);
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'delete',
+            $type,
+            (string) $id,
+            true,
+            ['force' => $force],
+            $this->durationMs($startedAt),
+        );
 
         return new WP_REST_Response(['deleted' => true, 'id' => $id, 'force' => $force]);
     }
 
     public function listComments(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -348,11 +555,25 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        return new WP_REST_Response((new CommentService())->list($request->get_params()));
+        $result = (new CommentService())->list($request->get_params());
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'comment',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
     }
 
     public function getComment(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -363,19 +584,44 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        $item = (new CommentService())->get((int) $request->get_param('id'));
+        $id = (int) $request->get_param('id');
+        $item = (new CommentService())->get($id);
+        $audit = new AuditLogger();
 
         if ($item === null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'read',
+                'comment',
+                (string) $id,
+                false,
+                null,
+                $this->durationMs($startedAt),
+            );
+
             $err = ErrorCodes::error(ErrorCodes::COMMENT_NOT_FOUND, 'Comment not found.', 404);
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
+
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'comment',
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
 
         return new WP_REST_Response($item);
     }
 
     public function moderateComment(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -391,7 +637,16 @@ final class RestRegistrar
         $audit = new AuditLogger();
 
         if ($result['error'] !== null) {
-            $audit->log($connection->id, RequestContext::requestId(), 'moderate', 'comment', (string) $request->get_param('id'), false);
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'moderate',
+                'comment',
+                (string) $request->get_param('id'),
+                false,
+                null,
+                $this->durationMs($startedAt),
+            );
 
             return RequestContext::invalid('Invalid moderation action or comment not found.');
         }
@@ -405,6 +660,7 @@ final class RestRegistrar
             $commentId,
             true,
             ['action' => $action],
+            $this->durationMs($startedAt),
         );
 
         return new WP_REST_Response($result['comment']);
@@ -412,6 +668,7 @@ final class RestRegistrar
 
     public function listTerms(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -422,11 +679,25 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        return new WP_REST_Response(['items' => (new TaxonomyService())->list($request->get_params())]);
+        $items = (new TaxonomyService())->list($request->get_params());
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'term',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response(['items' => $items]);
     }
 
     public function listMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -437,11 +708,25 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        return new WP_REST_Response((new MediaService())->list($request->get_params()));
+        $result = (new MediaService())->list($request->get_params());
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'media',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
     }
 
     public function uploadMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -458,7 +743,16 @@ final class RestRegistrar
         $audit = new AuditLogger();
 
         if ($result['error'] !== null) {
-            $audit->log($connection->id, RequestContext::requestId(), 'upload', 'media', null, false, ['error' => $result['error']]);
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'upload',
+                'media',
+                null,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
             $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 403;
             $err = ErrorCodes::error($result['error'], 'Failed to upload media.', $status);
 
@@ -466,13 +760,23 @@ final class RestRegistrar
         }
 
         $mediaId = (string) ($result['media']['id'] ?? '');
-        $audit->log($connection->id, RequestContext::requestId(), 'upload', 'media', $mediaId, true);
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'upload',
+            'media',
+            $mediaId,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
 
         return new WP_REST_Response($result['media'], 201);
     }
 
     public function getMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $connection = $this->connection($request);
 
         if ($connection instanceof WP_Error) {
@@ -483,15 +787,391 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        $item = (new MediaService())->get((int) $request->get_param('id'));
+        $id = (int) $request->get_param('id');
+        $item = (new MediaService())->get($id);
+        $audit = new AuditLogger();
 
         if ($item === null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'read',
+                'media',
+                (string) $id,
+                false,
+                null,
+                $this->durationMs($startedAt),
+            );
+
             $err = ErrorCodes::error(ErrorCodes::MEDIA_NOT_FOUND, 'Media not found.', 404);
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'media',
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
         return new WP_REST_Response($item);
+    }
+
+    public function mcpStats(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'site.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new StatsService())->stats($request->get_params());
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'mcp_stats',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function mcpLogs(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'site.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new StatsService())->logs($request->get_params());
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'mcp_logs',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function getRobots(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'site.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new SeoService())->getRobots();
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'robots',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function updateRobots(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'site.manage')) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $content = (string) ($payload['content'] ?? '');
+
+        $result = (new SeoService())->updateRobots($content);
+        $audit = new AuditLogger();
+
+        if (isset($result['error'])) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'seo_update',
+                'robots',
+                null,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $err = ErrorCodes::error((string) $result['error'], 'Failed to update robots.txt.', 500);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'seo_update',
+            'robots',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function seoAudit(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+        $post = get_post($id);
+
+        if (! $post instanceof \WP_Post) {
+            $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        if (! $this->canReadType($connection, $post->post_type)) {
+            return RequestContext::deny();
+        }
+
+        $result = (new SeoService())->audit($id);
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'seo_audit',
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function getSeoMetadata(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+        $post = get_post($id);
+
+        if (! $post instanceof \WP_Post) {
+            $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        if (! $this->canReadType($connection, $post->post_type)) {
+            return RequestContext::deny();
+        }
+
+        $result = (new SeoService())->getSeoMetadata($id);
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'seo_metadata',
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function updateSeoMetadata(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+
+        if (! $this->canUpdateContentType($connection, $id)) {
+            return $this->seoWriteDenied($id);
+        }
+
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+
+        $result = (new SeoService())->updateSeoMetadata($id, $payload);
+        $audit = new AuditLogger();
+
+        if (isset($result['error'])) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'seo_update',
+                'seo_metadata',
+                (string) $id,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $err = ErrorCodes::error((string) $result['error'], 'Failed to update SEO metadata.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'seo_update',
+            'seo_metadata',
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function seoFix(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+
+        if (! $this->canUpdateContentType($connection, $id)) {
+            return $this->seoWriteDenied($id);
+        }
+
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $changes = is_array($payload['changes'] ?? null) ? $payload['changes'] : [];
+
+        $result = (new SeoService())->updateSeoMetadata($id, $changes);
+        $audit = new AuditLogger();
+
+        if (isset($result['error'])) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'seo_fix',
+                'seo_metadata',
+                (string) $id,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $err = ErrorCodes::error((string) $result['error'], 'Failed to apply SEO fix.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'seo_fix',
+            'seo_metadata',
+            (string) $id,
+            true,
+            ['changes' => array_keys($changes)],
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    private function canUpdateContentType(Connection|WP_Error $connection, int $postId): bool
+    {
+        if ($connection instanceof WP_Error) {
+            return false;
+        }
+
+        $post = get_post($postId);
+
+        if (! $post instanceof \WP_Post || ! ContentTypes::isSupported($post->post_type)) {
+            return false;
+        }
+
+        $type = $post->post_type;
+        $scope = $type === ContentTypes::PAGE ? 'pages.update' : 'posts.update';
+
+        return ScopeChecker::canUpdateContent($connection, $type) && ScopeChecker::userCan($connection, $scope);
+    }
+
+    private function seoWriteDenied(int $postId): WP_Error
+    {
+        $post = get_post($postId);
+
+        if (! $post instanceof \WP_Post) {
+            $err = ErrorCodes::error(ErrorCodes::POST_NOT_FOUND, 'Content not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        return RequestContext::deny();
+    }
+
+    private function durationMs(float $startedAt): int
+    {
+        return (int) round((microtime(true) - $startedAt) * 1000);
     }
 
     private function connection(WP_REST_Request $_request): Connection|WP_Error

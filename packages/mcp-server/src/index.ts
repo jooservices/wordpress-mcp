@@ -6,11 +6,18 @@ import { loadConfig } from "./config.js";
 import { setupOAuth, type OAuthRuntime } from "./auth/setup.js";
 import { runWithAuth } from "./auth/context.js";
 import { createMcpServer } from "./mcp/server.js";
+import { createObservabilityHandler } from "./mcp/observability.js";
+import { SessionManager } from "./mcp/sessionManager.js";
+import { SUPPORTED_PROTOCOL_VERSIONS, patchVersionNegotiation } from "./mcp/versionNegotiator.js";
 import { SiteRegistry } from "./sites/registry.js";
 
 const config = loadConfig();
 const siteRegistry = new SiteRegistry(config.sites);
-const transports: Record<string, StreamableHTTPServerTransport> = {};
+const observability = createObservabilityHandler(config.mcpObservabilityEnabled);
+const sessions = new SessionManager({
+  maxSessions: config.mcpMaxSessions,
+  idleTimeoutMs: config.mcpSessionIdleMs,
+});
 
 let oauthRuntime: OAuthRuntime | undefined;
 
@@ -45,15 +52,21 @@ function getMcpServerOptions() {
   return {
     authMode: config.mcpAuthMode,
     resourceMetadataUrl: oauthRuntime?.resourceMetadataUrl,
+    disabledTools: config.mcpDisabledTools,
+    enabledTools: config.mcpEnabledTools,
+    observability,
+    protocolVersionPolicy: config.mcpProtocolVersionPolicy,
   };
 }
 
 function getServer() {
-  return createMcpServer(siteRegistry, getMcpServerOptions());
+  const server = createMcpServer(siteRegistry, getMcpServerOptions());
+  patchVersionNegotiation(server, observability, config.mcpProtocolVersionPolicy);
+  return server;
 }
 
 const app = express();
-app.use(express.json({ limit: "15mb" }));
+app.use(express.json({ limit: config.mcpJsonBodyLimit }));
 
 if (config.mcpAuthMode === "mixed" || config.mcpAuthMode === "oauth") {
   oauthRuntime = setupOAuth(app, config);
@@ -63,10 +76,22 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "wordpress-mcp",
+    version: "1.2.0",
     authMode: config.mcpAuthMode,
     sites: siteRegistry.listSites(),
+    protocolVersions: SUPPORTED_PROTOCOL_VERSIONS,
+    disabledTools: [...config.mcpDisabledTools],
+    enabledTools: config.mcpEnabledTools ? [...config.mcpEnabledTools] : null,
   });
 });
+
+const sessionSweeper = setInterval(() => {
+  const evicted = sessions.evictIdle();
+  for (const id of evicted) {
+    observability.recordEvent("mcp.session.evicted", { session_id: id, reason: "idle" });
+  }
+}, 60_000);
+sessionSweeper.unref();
 
 async function handleMcpPost(req: Request, res: Response): Promise<void> {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
@@ -74,34 +99,40 @@ async function handleMcpPost(req: Request, res: Response): Promise<void> {
   try {
     let transport: StreamableHTTPServerTransport;
 
-    if (sessionId && transports[sessionId]) {
-      transport = transports[sessionId];
-    } else if (!sessionId && isInitializeRequest(req.body)) {
+    if (sessionId) {
+      const existing = sessions.get(sessionId);
+      if (existing) {
+        transport = existing as StreamableHTTPServerTransport;
+      } else {
+        res.status(404).json({
+          jsonrpc: "2.0",
+          error: { code: -32001, message: "Session not found" },
+          id: null,
+        });
+        return;
+      }
+    } else if (isInitializeRequest(req.body)) {
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         enableJsonResponse: true,
         onsessioninitialized: (id) => {
-          transports[id] = transport;
+          const evicted = sessions.set(id, transport);
+          if (evicted) {
+            observability.recordEvent("mcp.session.evicted", { session_id: evicted, reason: "capacity" });
+          }
         },
       });
 
       transport.onclose = () => {
         const sid = transport.sessionId;
-        if (sid && transports[sid]) {
-          delete transports[sid];
+        if (sid) {
+          sessions.remove(sid);
         }
       };
 
       const server = getServer();
       await server.connect(transport);
       await runWithAuth(req.auth, () => transport.handleRequest(req, res, req.body));
-      return;
-    } else if (sessionId) {
-      res.status(404).json({
-        jsonrpc: "2.0",
-        error: { code: -32001, message: "Session not found" },
-        id: null,
-      });
       return;
     } else {
       res.status(400).json({
@@ -157,22 +188,22 @@ app.post("/mcp", mcpAuthMiddleware, (req, res) => {
 
 app.get("/mcp", mcpAuthMiddleware, async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId || !transports[sessionId]) {
+  if (!sessionId || !sessions.get(sessionId)) {
     res.status(400).send("Invalid or missing session ID");
     return;
   }
 
-  await runWithAuth(req.auth, () => transports[sessionId].handleRequest(req, res));
+  await runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res));
 });
 
 app.delete("/mcp", mcpAuthMiddleware, async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId || !transports[sessionId]) {
+  if (!sessionId || !sessions.get(sessionId)) {
     res.status(400).send("Invalid or missing session ID");
     return;
   }
 
-  await runWithAuth(req.auth, () => transports[sessionId].handleRequest(req, res));
+  await runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res));
 });
 
 app.listen(config.port, config.host, () => {
@@ -183,6 +214,12 @@ app.listen(config.port, config.host, () => {
   console.log(`WordPress MCP server listening on http://${config.host}:${config.port}/mcp`);
   console.log(`Auth mode: ${config.mcpAuthMode}`);
   console.log(`Configured sites: ${siteRegistry.listSiteIds().join(", ")}`);
+  if (config.mcpDisabledTools.size > 0) {
+    console.log(`Disabled tools: ${[...config.mcpDisabledTools].join(", ")}`);
+  }
+  if (config.mcpEnabledTools) {
+    console.log(`Tool allowlist: ${[...config.mcpEnabledTools].join(", ")}`);
+  }
   if (config.mcpPublicUrl) {
     console.log(`Public URL: ${config.mcpPublicUrl}/mcp`);
   }

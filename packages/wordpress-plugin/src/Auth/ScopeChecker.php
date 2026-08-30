@@ -12,6 +12,7 @@ final class ScopeChecker
     /** @var list<string> */
     public const ALL_SCOPES = [
         'site.read',
+        'site.manage',
         'posts.read',
         'posts.create',
         'posts.update',
@@ -108,6 +109,7 @@ final class ScopeChecker
     {
         return match ($scope) {
             'site.read', 'posts.read', 'pages.read', 'terms.read' => 'read',
+            'site.manage' => 'manage_options',
             'posts.create' => 'edit_posts',
             'posts.update' => 'edit_posts',
             'posts.publish' => 'publish_posts',

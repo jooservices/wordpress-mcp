@@ -7,14 +7,17 @@ namespace JOOservices\WordPressMcp\Admin;
 use JOOservices\WordPressMcp\Auth\ConnectionAuthenticator;
 use JOOservices\WordPressMcp\Auth\ScopeChecker;
 use JOOservices\WordPressMcp\Database\Schema;
+use JOOservices\WordPressMcp\Services\StatsService;
 
 final class AdminMenu
 {
+    private const EXPORT_ACTION = 'chatgpt_export_audit_log';
+
     public function register(): void
     {
         add_menu_page(
-            'JOOservices ChatGPT Connector',
-            'ChatGPT',
+            'JOOservices WordPress - MCP',
+            'WordPress - MCP',
             'manage_options',
             'chatgpt-connector',
             [$this, 'renderConnections'],
@@ -30,6 +33,8 @@ final class AdminMenu
             'chatgpt-audit',
             [$this, 'renderAudit'],
         );
+
+        add_action('admin_post_' . self::EXPORT_ACTION, [$this, 'exportAuditLog']);
     }
 
     public function renderConnections(): void
@@ -56,13 +61,73 @@ final class AdminMenu
             return;
         }
 
-        global $wpdb;
-        $rows = $wpdb->get_results(
-            'SELECT * FROM ' . Schema::auditTable() . ' ORDER BY id DESC LIMIT 100',
-            ARRAY_A,
+        $filters = $this->auditFilters();
+        $service = new StatsService();
+        $logs = $service->logs($filters);
+        $stats = $service->stats($filters);
+        $rows = $logs['items'];
+        $exportUrl = wp_nonce_url(
+            add_query_arg(array_merge($filters, ['action' => self::EXPORT_ACTION]), admin_url('admin-post.php')),
+            self::EXPORT_ACTION,
         );
 
         include JOOSERVICES_WORDPRESS_MCP_PATH . 'templates/admin-audit.php';
+    }
+
+    public function exportAuditLog(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('Forbidden', 403);
+        }
+
+        check_admin_referer(self::EXPORT_ACTION);
+
+        $rows = (new StatsService())->exportRows($this->auditFilters());
+
+        nocache_headers();
+        header('Content-Type: text/csv; charset=utf-8');
+        header('Content-Disposition: attachment; filename="mcp-audit-log.csv"');
+
+        $out = fopen('php://output', 'w');
+        fputcsv($out, [
+            'id', 'connection_id', 'request_id', 'action',
+            'resource_type', 'resource_id', 'success', 'duration_ms', 'created_at',
+        ]);
+
+        foreach ($rows as $row) {
+            fputcsv($out, [
+                $row['id'],
+                $row['connection_id'] ?? '',
+                $row['request_id'],
+                $row['action'],
+                $row['resource_type'],
+                $row['resource_id'] ?? '',
+                (int) $row['success'] === 1 ? 'yes' : 'no',
+                $row['duration_ms'] ?? '',
+                $row['created_at'],
+            ]);
+        }
+
+        fclose($out);
+        exit;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function auditFilters(): array
+    {
+        $filters = [];
+
+        foreach (['action', 'resource_type', 'since', 'until'] as $key) {
+            $value = isset($_GET[$key]) ? sanitize_text_field(wp_unslash((string) $_GET[$key])) : '';
+
+            if ($value !== '') {
+                $filters[$key] = $value;
+            }
+        }
+
+        return $filters;
     }
 
     private function handlePostActions(): void
