@@ -8,6 +8,8 @@ use JOOservices\WordPressMcp\Admin\AdminMenu;
 use JOOservices\WordPressMcp\Audit\AuditLogger;
 use JOOservices\WordPressMcp\Database\Schema;
 use JOOservices\WordPressMcp\Http\RestRegistrar;
+use JOOservices\WordPressMcp\PostTemplates\PostTemplateAdmin;
+use JOOservices\WordPressMcp\PostTemplates\PostTemplateRegistrar;
 use JOOservices\WordPressMcp\Services\SiteOperationsService;
 use JOOservices\WordPressMcp\Services\SeoService;
 use JOOservices\WordPressMcp\Services\RedirectService;
@@ -47,11 +49,14 @@ final class Plugin
         register_deactivation_hook(JOOSERVICES_WORDPRESS_MCP_FILE, [self::class, 'deactivate']);
         add_action('plugins_loaded', [Schema::class, 'maybeUpgrade']);
         add_action(self::PURGE_CRON_HOOK, [self::class, 'purgeAuditLog']);
+        add_action('init', [new PostTemplateRegistrar(), 'register']);
         add_action('rest_api_init', [new RestRegistrar(), 'register']);
         add_action('template_redirect', [self::class, 'enforceMaintenance'], 0);
         add_action('template_redirect', [RedirectService::class, 'applyAndLog'], 1);
         $adminMenu = new AdminMenu();
+        $templateAdmin = new PostTemplateAdmin();
         add_action('admin_menu', [$adminMenu, 'register']);
+        add_action('admin_menu', [$templateAdmin, 'register']);
         add_action('admin_init', [$adminMenu, 'registerPostHandlers']);
         add_filter('robots_txt', [SeoService::class, 'filterRobotsTxt']);
     }

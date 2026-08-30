@@ -13,10 +13,12 @@ use JOOservices\WordPressMcp\Services\ContentService;
 use JOOservices\WordPressMcp\Services\MediaService;
 use JOOservices\WordPressMcp\Services\NavigationService;
 use JOOservices\WordPressMcp\Services\PluginService;
+use JOOservices\WordPressMcp\Services\PostTemplateService;
 use JOOservices\WordPressMcp\Services\SeoService;
 use JOOservices\WordPressMcp\Services\SettingsService;
 use JOOservices\WordPressMcp\Services\StatsService;
 use JOOservices\WordPressMcp\Services\SiteOperationsService;
+use JOOservices\WordPressMcp\Services\SiteService;
 use JOOservices\WordPressMcp\Services\RevisionService;
 use JOOservices\WordPressMcp\Services\RedirectService;
 use JOOservices\WordPressMcp\Services\TaxonomyService;
@@ -37,12 +39,6 @@ final class RestRegistrar
         register_rest_route(self::NAMESPACE, '/site', [
             'methods' => 'GET',
             'callback' => [$this, 'site'],
-            'permission_callback' => [$this, 'authenticate'],
-        ]);
-
-        register_rest_route(self::NAMESPACE, '/site/limits', [
-            'methods' => 'GET',
-            'callback' => [$this, 'siteLimits'],
             'permission_callback' => [$this, 'authenticate'],
         ]);
 
@@ -75,6 +71,18 @@ final class RestRegistrar
                 'callback' => [$this, 'deleteContent'],
                 'permission_callback' => [$this, 'authenticate'],
             ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/post-templates', [
+            'methods' => 'GET',
+            'callback' => [$this, 'listPostTemplates'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/post-templates/(?P<id>\d+)', [
+            'methods' => 'GET',
+            'callback' => [$this, 'getPostTemplate'],
+            'permission_callback' => [$this, 'authenticate'],
         ]);
 
         register_rest_route(self::NAMESPACE, '/comments', [
@@ -205,7 +213,7 @@ final class RestRegistrar
             'permission_callback' => [$this, 'authenticate'],
         ]);
 
-        foreach (['install', 'activate', 'deactivate', 'update', 'delete'] as $action) {
+        foreach (['install', 'update', 'delete'] as $action) {
             register_rest_route(self::NAMESPACE, '/plugins/' . $action, [
                 'methods' => 'POST',
                 'callback' => [$this, 'managePlugin'],
@@ -213,6 +221,13 @@ final class RestRegistrar
                 'args' => ['action' => ['default' => $action]],
             ]);
         }
+
+        register_rest_route(self::NAMESPACE, '/plugins/state', [
+            'methods' => 'POST',
+            'callback' => [$this, 'managePlugin'],
+            'permission_callback' => [$this, 'authenticate'],
+            'args' => ['action' => ['default' => 'state']],
+        ]);
 
         register_rest_route(self::NAMESPACE, '/themes', [
             'methods' => 'GET',
@@ -327,59 +342,13 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        $response = new WP_REST_Response([
-            'name' => get_bloginfo('name'),
-            'url' => home_url('/'),
-            'wordpress_version' => get_bloginfo('version'),
-            'timezone' => wp_timezone_string(),
-            'supported_capabilities' => $connection->scopes,
-        ]);
+        $response = new WP_REST_Response((new SiteService())->get($connection));
 
         (new AuditLogger())->log(
             $connection->id,
             RequestContext::requestId(),
             'read',
             'site',
-            null,
-            true,
-            null,
-            $this->durationMs($startedAt),
-        );
-
-        return $response;
-    }
-
-    /**
-     * Reports the site's real PHP/WordPress size limits so MCP can stop
-     * pre-rejecting uploads/content at an arbitrary body-size cap — WordPress
-     * (and its host's php.ini) is the authoritative limit, not the MCP server.
-     */
-    public function siteLimits(WP_REST_Request $request): WP_REST_Response|WP_Error
-    {
-        $startedAt = microtime(true);
-        $connection = $this->connection($request);
-
-        if ($connection instanceof WP_Error) {
-            return $connection;
-        }
-
-        if (! ScopeChecker::userCan($connection, 'site.read')) {
-            return RequestContext::deny();
-        }
-
-        $response = new WP_REST_Response([
-            'upload_max_filesize' => (string) ini_get('upload_max_filesize'),
-            'post_max_size' => (string) ini_get('post_max_size'),
-            'memory_limit' => (string) ini_get('memory_limit'),
-            'max_execution_time' => (string) ini_get('max_execution_time'),
-            'wp_max_upload_size_bytes' => (int) wp_max_upload_size(),
-        ]);
-
-        (new AuditLogger())->log(
-            $connection->id,
-            RequestContext::requestId(),
-            'read',
-            'site_limits',
             null,
             true,
             null,
@@ -555,6 +524,83 @@ final class RestRegistrar
         );
 
         return new WP_REST_Response($result['post'], 201);
+    }
+
+    public function listPostTemplates(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $type = ContentTypes::normalize(sanitize_key((string) ($request->get_param('type') ?? ContentTypes::POST)), ContentTypes::POST);
+
+        if ($type === null) {
+            return RequestContext::invalid('Unsupported content type. Use post or page.');
+        }
+
+        $templateScope = $type === ContentTypes::PAGE ? 'pages.templates.read' : 'posts.templates.read';
+
+        if (! ScopeChecker::canReadTemplates($connection, $type) || ! ScopeChecker::userCan($connection, $templateScope)) {
+            return RequestContext::deny();
+        }
+
+        $result = (new PostTemplateService())->list($request->get_params());
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'post_template',
+            null,
+            true,
+            ['type' => $type],
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function getPostTemplate(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+        $service = new PostTemplateService();
+        $template = $service->get($id);
+
+        if ($template === null) {
+            $err = ErrorCodes::error(ErrorCodes::TEMPLATE_NOT_FOUND, 'Post template not found.', 404);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $type = (string) ($template['for_type'] ?? ContentTypes::POST);
+        $templateScope = $type === ContentTypes::PAGE ? 'pages.templates.read' : 'posts.templates.read';
+
+        if (! ScopeChecker::canReadTemplates($connection, $type) || ! ScopeChecker::userCan($connection, $templateScope)) {
+            return RequestContext::deny();
+        }
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'post_template',
+            (string) $id,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($template);
     }
 
     public function updateContent(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -739,10 +785,55 @@ final class RestRegistrar
         }
 
         $action = (string) $request->get_param('action');
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+
+        if ($action === 'state') {
+            $enabled = (bool) ($payload['enabled'] ?? false);
+            $scope = $enabled ? 'plugins.activate' : 'plugins.deactivate';
+
+            if (! ScopeChecker::userCan($connection, $scope)) {
+                return RequestContext::deny();
+            }
+
+            $service = new PluginService();
+            $result = $service->setState((string) ($payload['plugin'] ?? ''), $enabled);
+            $auditAction = $enabled ? 'activate' : 'deactivate';
+            $audit = new AuditLogger();
+
+            if (($result['error'] ?? null) !== null) {
+                $audit->log(
+                    $connection->id,
+                    RequestContext::requestId(),
+                    $auditAction,
+                    'plugin',
+                    isset($payload['plugin']) ? (string) $payload['plugin'] : null,
+                    false,
+                    ['error' => $result['error']],
+                    $this->durationMs($startedAt),
+                );
+
+                $err = ErrorCodes::error($result['error'], 'Failed to change plugin state.', 400);
+
+                return new WP_Error($err['code'], $err['message'], $err['data']);
+            }
+
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                $auditAction,
+                'plugin',
+                isset($payload['plugin']) ? (string) $payload['plugin'] : null,
+                true,
+                ['enabled' => $enabled],
+                $this->durationMs($startedAt),
+            );
+
+            return new WP_REST_Response($result['plugin']);
+        }
+
         $scope = match ($action) {
             'install' => 'plugins.install',
-            'activate' => 'plugins.activate',
-            'deactivate' => 'plugins.deactivate',
             'update' => 'plugins.update',
             'delete' => 'plugins.delete',
             default => null,
@@ -752,14 +843,10 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        $params = $request->get_json_params();
-        $payload = is_array($params) ? $params : [];
         $service = new PluginService();
 
         $result = match ($action) {
             'install' => $service->install((string) ($payload['slug'] ?? '')),
-            'activate' => $service->activate((string) ($payload['plugin'] ?? '')),
-            'deactivate' => $service->deactivate((string) ($payload['plugin'] ?? '')),
             'update' => $service->update((string) ($payload['plugin'] ?? '')),
             'delete' => $service->delete((string) ($payload['plugin'] ?? '')),
             default => ['error' => ErrorCodes::INVALID_ARGUMENT],
@@ -1121,11 +1208,27 @@ final class RestRegistrar
                 'media',
                 null,
                 false,
-                ['error' => $result['error']],
+                [
+                    'error' => $result['error'],
+                    'error_step' => $result['error_step'],
+                ],
                 $this->durationMs($startedAt),
             );
-            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 403;
-            $err = ErrorCodes::error($result['error'], 'Failed to upload media.', $status);
+            $status = match ($result['error']) {
+                ErrorCodes::INVALID_ARGUMENT, ErrorCodes::MEDIA_VERIFY_FAILED => 400,
+                ErrorCodes::MEDIA_UPLOAD_LIMIT_EXCEEDED => 413,
+                ErrorCodes::POST_NOT_FOUND => 404,
+                default => 403,
+            };
+            $err = ErrorCodes::error(
+                $result['error'],
+                'Failed to upload media.',
+                $status,
+                array_filter([
+                    'verification_step' => $result['error_step'],
+                    'verification' => $result['verification'],
+                ], static fn(mixed $value): bool => $value !== null),
+            );
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
@@ -1159,7 +1262,8 @@ final class RestRegistrar
         }
 
         $id = (int) $request->get_param('id');
-        $item = (new MediaService())->get($id);
+        $verify = filter_var($request->get_param('verify') ?? false, FILTER_VALIDATE_BOOLEAN);
+        $item = (new MediaService())->get($id, $verify);
         $audit = new AuditLogger();
 
         if ($item === null) {
@@ -1212,8 +1316,17 @@ final class RestRegistrar
 
         if ($result['error'] !== null) {
             $this->auditMedia($connection, 'update', $id, false, $result['error'], $startedAt);
-            $status = $result['error'] === ErrorCodes::MEDIA_NOT_FOUND ? 404 : 400;
-            $err = ErrorCodes::error($result['error'], 'Failed to update media.', $status);
+            $status = match ($result['error']) {
+                ErrorCodes::MEDIA_NOT_FOUND => 404,
+                ErrorCodes::MEDIA_VERIFY_FAILED => 400,
+                default => 400,
+            };
+            $err = ErrorCodes::error(
+                $result['error'],
+                'Failed to update media.',
+                $status,
+                array_filter(['verification_step' => $result['error_step']], static fn(mixed $value): bool => $value !== null),
+            );
 
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }

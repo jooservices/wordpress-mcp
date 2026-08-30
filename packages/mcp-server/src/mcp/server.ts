@@ -17,12 +17,12 @@ import {
   type MediaDto,
   type PaginatedDto,
   type PluginDto,
+  type PostTemplateDto,
   type RobotsDto,
   type SeoAuditDto,
   type SeoMetadataDto,
   type SettingsDto,
   type SiteDto,
-  type SiteLimitsDto,
   type TermDto,
   type ThemeDto,
   type UserDto,
@@ -204,7 +204,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   const server = new McpServer(
     {
       name: "wordpress-mcp",
-      version: "1.3.0",
+      version: "1.4.0",
     },
     {
       instructions: serverInstructions(registry),
@@ -269,7 +269,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       name: "wordpress_get_site",
       title: "Get WordPress site info",
       description:
-        "Returns site name, URL, timezone, and supported capabilities for a connected WordPress site.",
+        "Returns site name, URL, timezone, capabilities, PHP upload limits, settings (when settings.read), health (when site.health.read), plugin/theme/core updates (when updates.read), maintenance mode, and active theme summary. Call before uploads or site-wide changes.",
       inputSchema: getSiteSchema,
       access: "read",
       dto: { kind: "site" },
@@ -279,31 +279,6 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       return {
         content: [{ type: "text", text: JSON.stringify(siteInfo, null, 2) }],
         structuredContent: withSiteMeta(siteId, siteInfo),
-      };
-    },
-  );
-
-  const getSiteLimitsSchema = z.object({ site: siteSchema });
-  type GetSiteLimitsArgs = z.infer<typeof getSiteLimitsSchema>;
-
-  registerWordPressTool(
-    server,
-    registry,
-    options,
-    {
-      name: "wordpress_get_site_limits",
-      title: "Get WordPress site upload/content size limits",
-      description:
-        "Returns the site's real PHP limits (upload_max_filesize, post_max_size, memory_limit, max_execution_time) and WordPress's effective max upload size. Check this before a large upload or content write — WordPress's own limits are authoritative, not MCP's.",
-      inputSchema: getSiteLimitsSchema,
-      access: "read",
-      dto: { kind: "site_limits" },
-    },
-    async ({ client, siteId, args }: ToolContext<GetSiteLimitsArgs>) => {
-      const limits = await client.get<SiteLimitsDto>("/site/limits", wpArgs(args));
-      return {
-        content: [{ type: "text", text: JSON.stringify(limits, null, 2) }],
-        structuredContent: withSiteMeta(siteId, limits),
       };
     },
   );
@@ -370,51 +345,63 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
 
   const managePluginSchema = z.object({
     site: siteSchema,
+    action: z.enum(["state", "update", "delete"]).describe("state toggles activation; update upgrades code; delete removes an inactive plugin."),
     plugin: z.string().min(1).describe("Installed plugin file, for example akismet/akismet.php."),
-    confirm: z.boolean().optional().default(false).describe("Required before changing installed plugin code or activation state."),
+    enabled: z.boolean().optional().describe("Required when action is state: true activates, false deactivates."),
+    confirm: z.boolean().optional().default(false).describe("Required before changing plugin state or code."),
   });
   type ManagePluginArgs = z.infer<typeof managePluginSchema>;
 
-  const pluginActions = [
-    ["activate", "wordpress_activate_plugin", "Activate"],
-    ["deactivate", "wordpress_deactivate_plugin", "Deactivate"],
-    ["update", "wordpress_update_plugin", "Update"],
-    ["delete", "wordpress_delete_plugin", "Delete"],
-  ] as const;
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_manage_plugin",
+      title: "Manage an installed WordPress plugin",
+      description:
+        "Activate/deactivate (action state + enabled), update, or delete an installed plugin. Requires matching plugins.* scope and confirm: true. Delete requires the plugin to be inactive.",
+      inputSchema: managePluginSchema,
+      access: "delete",
+      dto: { kind: "plugin" },
+    },
+    async ({ client, siteId, args }: ToolContext<ManagePluginArgs>) => {
+      const actionLabels: Record<ManagePluginArgs["action"], string> = {
+        state: args.enabled ? "Activate" : "Deactivate",
+        update: "Update",
+        delete: "Delete",
+      };
+      const actionLabel = actionLabels[args.action];
 
-  for (const [action, name, title] of pluginActions) {
-    registerWordPressTool(
-      server,
-      registry,
-      options,
-      {
-        name,
-        title: `${title} a WordPress plugin`,
-        description: `${title} an installed WordPress plugin. Requires plugins.${action} and confirm: true.${action === "delete" ? " Deactivate the plugin first." : ""}`,
-        inputSchema: managePluginSchema,
-        access: action === "delete" ? "delete" : "write",
-        ...(action === "delete" ? {} : { dto: { kind: "plugin" as const } }),
-      },
-      async ({ client, siteId, args }: ToolContext<ManagePluginArgs>) => {
-        if (!args.confirm) {
-          return confirmationRequired(
-            `${title} plugin "${args.plugin}" on site "${siteId}" changes site code or runtime state. Re-run with confirm: true to proceed.`,
-            withSiteMeta(siteId, { action, plugin: args.plugin }),
-          );
-        }
+      if (args.action === "state" && args.enabled === undefined) {
+        return executionError(new Error("enabled is required when action is state."));
+      }
 
-        const { confirm: _confirm, ...payload } = wpArgs(args);
-        const result = await client.post<PluginDto | { deleted: boolean }>(`/plugins/${action}`, payload);
-        const text = action === "delete"
-          ? `Deleted plugin "${args.plugin}" on site "${siteId}".`
-          : `${title}d plugin "${args.plugin}" on site "${siteId}".`;
-        return {
-          content: [{ type: "text", text }],
-          structuredContent: withSiteMeta(siteId, result),
-        };
-      },
-    );
-  }
+      if (!args.confirm) {
+        return confirmationRequired(
+          `${actionLabel} plugin "${args.plugin}" on site "${siteId}" changes site code or runtime state. Re-run with confirm: true to proceed.`,
+          withSiteMeta(siteId, {
+            action: args.action,
+            plugin: args.plugin,
+            ...(args.action === "state" ? { enabled: args.enabled } : {}),
+          }),
+        );
+      }
+
+      const { confirm: _confirm, action, ...payload } = wpArgs(args);
+      const path = action === "state" ? "/plugins/state" : `/plugins/${action}`;
+      const result = await client.post<PluginDto | { deleted: boolean }>(path, action === "state" ? { plugin: payload.plugin, enabled: args.enabled } : { plugin: payload.plugin });
+
+      const text = action === "delete"
+        ? `Deleted plugin "${args.plugin}" on site "${siteId}".`
+        : `${actionLabel}d plugin "${args.plugin}" on site "${siteId}".`;
+
+      return {
+        content: [{ type: "text", text }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
 
   const listThemesSchema = z.object({ site: siteSchema });
   type ListThemesArgs = z.infer<typeof listThemesSchema>;
@@ -478,47 +465,54 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
 
   const manageThemeSchema = z.object({
     site: siteSchema,
+    action: z.enum(["activate", "update", "delete"]).describe("activate switches the active theme; update upgrades; delete removes a non-active theme."),
     stylesheet: z.string().min(1).describe("Installed theme stylesheet, for example twentytwentyfive."),
     confirm: z.boolean().optional().default(false).describe("Required before changing installed theme code or the active theme."),
   });
   type ManageThemeArgs = z.infer<typeof manageThemeSchema>;
 
-  const themeActions = [
-    ["activate", "wordpress_activate_theme", "Activate"],
-    ["update", "wordpress_update_theme", "Update"],
-    ["delete", "wordpress_delete_theme", "Delete"],
-  ] as const;
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_manage_theme",
+      title: "Manage an installed WordPress theme",
+      description:
+        "Activate, update, or delete an installed theme. Requires matching themes.* scope and confirm: true. The active theme cannot be deleted.",
+      inputSchema: manageThemeSchema,
+      access: "delete",
+      dto: { kind: "theme" },
+    },
+    async ({ client, siteId, args }: ToolContext<ManageThemeArgs>) => {
+      const actionLabels: Record<ManageThemeArgs["action"], string> = {
+        activate: "Activate",
+        update: "Update",
+        delete: "Delete",
+      };
+      const actionLabel = actionLabels[args.action];
 
-  for (const [action, name, title] of themeActions) {
-    registerWordPressTool(
-      server,
-      registry,
-      options,
-      {
-        name,
-        title: `${title} a WordPress theme`,
-        description: `${title} an installed WordPress theme. Requires the matching themes.* scope and confirm: true.${action === "delete" ? " The active theme cannot be deleted." : ""}`,
-        inputSchema: manageThemeSchema,
-        access: action === "delete" ? "delete" : "write",
-        ...(action === "delete" ? {} : { dto: { kind: "theme" as const } }),
-      },
-      async ({ client, siteId, args }: ToolContext<ManageThemeArgs>) => {
-        if (!args.confirm) {
-          return confirmationRequired(
-            `${title} theme "${args.stylesheet}" on site "${siteId}" changes site code or presentation. Re-run with confirm: true to proceed.`,
-            withSiteMeta(siteId, { action, stylesheet: args.stylesheet }),
-          );
-        }
+      if (!args.confirm) {
+        return confirmationRequired(
+          `${actionLabel} theme "${args.stylesheet}" on site "${siteId}" changes site code or presentation. Re-run with confirm: true to proceed.`,
+          withSiteMeta(siteId, { action: args.action, stylesheet: args.stylesheet }),
+        );
+      }
 
-        const { confirm: _confirm, ...payload } = wpArgs(args);
-        const result = await client.post<ThemeDto | { deleted: boolean }>(`/themes/${action}`, payload);
-        return {
-          content: [{ type: "text", text: action === "delete" ? `Deleted theme "${args.stylesheet}" on site "${siteId}".` : `${title}d theme "${args.stylesheet}" on site "${siteId}".` }],
-          structuredContent: withSiteMeta(siteId, result),
-        };
-      },
-    );
-  }
+      const { confirm: _confirm, action, ...payload } = wpArgs(args);
+      const result = await client.post<ThemeDto | { deleted: boolean }>(`/themes/${action}`, { stylesheet: payload.stylesheet });
+
+      return {
+        content: [{
+          type: "text",
+          text: action === "delete"
+            ? `Deleted theme "${args.stylesheet}" on site "${siteId}".`
+            : `${actionLabel}d theme "${args.stylesheet}" on site "${siteId}".`,
+        }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
 
   const listUsersSchema = z.object({ site: siteSchema, q: z.string().optional(), page: z.number().int().min(1).optional(), per_page: z.number().int().min(1).max(50).optional() });
   type ListUsersArgs = z.infer<typeof listUsersSchema>;
@@ -597,64 +591,38 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
-  const mcpStatsSchema = z.object({
+  const mcpActivitySchema = z.object({
     site: siteSchema,
+    mode: z.enum(["stats", "logs"]).optional().default("stats").describe("stats for aggregated counts; logs for paginated audit rows."),
     action: z.string().optional().describe("Filter to one action: read, create, update, delete, moderate, upload, denied"),
     resource_type: z.string().optional().describe("Filter to one resource type, e.g. post, page, comment, media, term"),
     since: z.string().optional().describe("ISO 8601 timestamp lower bound"),
     until: z.string().optional().describe("ISO 8601 timestamp upper bound"),
+    page: z.number().int().min(1).optional().describe("Logs mode only."),
+    per_page: z.number().int().min(1).max(100).optional().describe("Logs mode only."),
   });
-  type McpStatsArgs = z.infer<typeof mcpStatsSchema>;
+  type McpActivityArgs = z.infer<typeof mcpActivitySchema>;
 
   registerWordPressTool(
     server,
     registry,
     options,
     {
-      name: "wordpress_get_mcp_stats",
-      title: "Get MCP request stats for a WordPress site",
+      name: "wordpress_get_mcp_activity",
+      title: "Get MCP request activity for a WordPress site",
       description:
-        "Returns request counts (total, success, error, average latency) from this site's audit log, broken down by action. Does not include prompt or token content.",
-      inputSchema: mcpStatsSchema,
+        "Returns audit stats (mode stats) or paginated request log rows (mode logs). Does not include prompt or token content.",
+      inputSchema: mcpActivitySchema,
       access: "read",
     },
-    async ({ client, siteId, args }: ToolContext<McpStatsArgs>) => {
-      const stats = await client.get("/mcp/stats", wpArgs(args));
-      return {
-        content: [{ type: "text", text: JSON.stringify(stats, null, 2) }],
-        structuredContent: withSiteMeta(siteId, stats as Record<string, unknown>),
-      };
-    },
-  );
+    async ({ client, siteId, args }: ToolContext<McpActivityArgs>) => {
+      const { mode, ...query } = wpArgs(args);
+      const path = mode === "logs" ? "/mcp/logs" : "/mcp/stats";
+      const result = await client.get(path, query);
 
-  const mcpLogsSchema = z.object({
-    site: siteSchema,
-    action: z.string().optional().describe("Filter to one action: read, create, update, delete, moderate, upload, denied"),
-    resource_type: z.string().optional().describe("Filter to one resource type, e.g. post, page, comment, media, term"),
-    since: z.string().optional().describe("ISO 8601 timestamp lower bound"),
-    until: z.string().optional().describe("ISO 8601 timestamp upper bound"),
-    page: z.number().int().min(1).optional(),
-    per_page: z.number().int().min(1).max(100).optional(),
-  });
-  type McpLogsArgs = z.infer<typeof mcpLogsSchema>;
-
-  registerWordPressTool(
-    server,
-    registry,
-    options,
-    {
-      name: "wordpress_get_mcp_request_log",
-      title: "Get MCP request log for a WordPress site",
-      description:
-        "Returns paginated audit log rows (request id, action, resource, success, latency, timestamp) from this site. Does not include prompt or token content — use for debugging or auditing tool activity.",
-      inputSchema: mcpLogsSchema,
-      access: "read",
-    },
-    async ({ client, siteId, args }: ToolContext<McpLogsArgs>) => {
-      const logs = await client.get("/mcp/logs", wpArgs(args));
       return {
-        content: [{ type: "text", text: JSON.stringify(logs, null, 2) }],
-        structuredContent: withSiteMeta(siteId, logs as Record<string, unknown>),
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: withSiteMeta(siteId, { mode, ...(result as Record<string, unknown>) }),
       };
     },
   );
@@ -741,6 +709,14 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       .min(0)
       .optional()
       .describe("Image attachment ID for the featured image. Use 0 only when updating to remove it."),
+    template_id: z.number().int().positive().optional().describe("Apply a specific post template by ID."),
+    template_slug: z.string().optional().describe("Apply a specific post template by slug."),
+    use_template: z
+      .enum(["auto", "default", "none"])
+      .optional()
+      .describe(
+        "Template selection mode. Omit or use none for no template. auto matches rules/default; default uses the site default template.",
+      ),
   });
   type CreateContentArgs = z.infer<typeof createContentSchema>;
 
@@ -751,16 +727,23 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     {
       name: "wordpress_create_content",
       title: "Create WordPress draft content",
-      description: "Create a new post or page. Defaults to draft status.",
+      description:
+        "Create a new post or page. Defaults to draft status. Optionally apply an admin-defined template via template_id, template_slug, or use_template.",
       inputSchema: createContentSchema,
       access: "write",
       dto: { kind: "content" },
     },
     async ({ client, siteId, args }: ToolContext<CreateContentArgs>) => {
-      const item = await client.post<ContentDto>("/content", {
+      const payload: Record<string, unknown> = {
         ...wpArgs(args),
         status: args.status ?? "draft",
-      });
+      };
+
+      if (args.use_template === "none") {
+        delete payload.use_template;
+      }
+
+      const item = await client.post<ContentDto>("/content", payload);
       return {
         content: [
           {
@@ -769,6 +752,37 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
           },
         ],
         structuredContent: withSiteMeta(siteId, item),
+      };
+    },
+  );
+
+  const listPostTemplatesSchema = z.object({
+    site: siteSchema,
+    type: z.enum(["post", "page"]).optional().default("post"),
+    page: z.number().int().min(1).optional().default(1),
+    per_page: z.number().int().min(1).max(50).optional().default(20),
+  });
+  type ListPostTemplatesArgs = z.infer<typeof listPostTemplatesSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_list_post_templates",
+      title: "List WordPress post templates",
+      description:
+        "List admin-defined post/page templates with placeholders and auto-match rules. Use before create_content when applying a template.",
+      inputSchema: listPostTemplatesSchema,
+      access: "read",
+      dto: { kind: "post_template", list: true },
+    },
+    async ({ client, siteId, args }: ToolContext<ListPostTemplatesArgs>) => {
+      const result = await client.get<PaginatedDto<PostTemplateDto>>("/post-templates", wpArgs(args));
+
+      return {
+        content: [{ type: "text", text: `Found ${result.items.length} template(s) on site "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, result),
       };
     },
   );
@@ -796,6 +810,11 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       .describe(
         "Required to confirm publishing content that is not already published. Re-run with true after the user reviews the proposed changes.",
       ),
+    preview: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("When true, returns the field-level diff without applying changes."),
   });
   type UpdateContentArgs = z.infer<typeof updateContentSchema>;
 
@@ -807,12 +826,34 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       name: "wordpress_update_content",
       title: "Update WordPress content",
       description:
-        "Partially update a post or page. Only provided fields are changed. Changing status to publish requires confirm: true.",
+        "Partially update a post or page, or set preview: true to see the diff without changing anything. Publishing requires confirm: true.",
       inputSchema: updateContentSchema,
       access: "write",
-      dto: { kind: "content" },
     },
     async ({ client, siteId, args }: ToolContext<UpdateContentArgs>) => {
+      if (args.preview) {
+        const current = await client.get<ContentDto>(`/content/${args.id}`);
+        const changes = computeContentChanges(current, args);
+
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                changes.length === 0
+                  ? `No changes: the proposed payload matches content #${args.id} on site "${siteId}".`
+                  : `${changes.length} field change(s) proposed for content #${args.id} on site "${siteId}".`,
+            },
+          ],
+          structuredContent: withSiteMeta(siteId, {
+            id: args.id,
+            preview: true,
+            changes,
+            current: sanitizeRecord("content", current),
+          }),
+        };
+      }
+
       if (args.status === "publish" && !args.confirm) {
         const current = await client.get<ContentDto>(`/content/${args.id}`);
 
@@ -824,59 +865,11 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
         }
       }
 
-      const { confirm: _confirm, ...payload } = wpArgs(args);
+      const { confirm: _confirm, preview: _preview, ...payload } = wpArgs(args);
       const item = await client.patch<ContentDto>(`/content/${args.id}`, payload);
       return {
         content: [{ type: "text", text: `Updated content #${args.id} on site "${siteId}".` }],
-        structuredContent: withSiteMeta(siteId, item),
-      };
-    },
-  );
-
-  const previewContentUpdateSchema = z.object({
-    site: siteSchema,
-    id: z.number().int().positive(),
-    title: z.string().optional(),
-    content: z.string().optional(),
-    excerpt: z.string().optional(),
-    slug: z.string().optional(),
-    status: z.enum(["draft", "pending", "publish", "private"]).optional(),
-    categories: z.array(z.number()).optional(),
-    tags: z.array(z.string()).optional(),
-    featured_media: z.number().int().min(0).optional().describe("Image attachment ID; 0 removes the featured image."),
-  });
-  type PreviewContentUpdateArgs = z.infer<typeof previewContentUpdateSchema>;
-
-  registerWordPressTool(
-    server,
-    registry,
-    options,
-    {
-      name: "wordpress_preview_content_update",
-      title: "Preview content update changes",
-      description:
-        "Preview the field-level changes a wordpress_update_content call would apply to a post or page, without changing anything.",
-      inputSchema: previewContentUpdateSchema,
-      access: "read",
-    },
-    async ({ client, siteId, args }: ToolContext<PreviewContentUpdateArgs>) => {
-      const current = await client.get<ContentDto>(`/content/${args.id}`);
-      const changes = computeContentChanges(current, args);
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              changes.length === 0
-                ? `No changes: the proposed payload matches content #${args.id} on site "${siteId}".`
-                : `${changes.length} field change(s) proposed for content #${args.id} on site "${siteId}".`,
-          },
-        ],
-        structuredContent: withSiteMeta(siteId, {
-          id: args.id,
-          changes,
-          current: sanitizeRecord("content", current),
-        }),
+        structuredContent: withSiteMeta(siteId, sanitizeRecord("content", item)),
       };
     },
   );
@@ -1080,7 +1073,15 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
-  const getMediaSchema = z.object({ site: siteSchema, id: z.number().int().positive() });
+  const getMediaSchema = z.object({
+    site: siteSchema,
+    id: z.number().int().positive(),
+    verify: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("When true, re-run stored-file and public URL verification for an existing attachment."),
+  });
   type GetMediaArgs = z.infer<typeof getMediaSchema>;
 
   registerWordPressTool(
@@ -1090,13 +1091,18 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     {
       name: "wordpress_get_media",
       title: "Get WordPress media",
-      description: "Fetch media metadata by ID.",
+      description:
+        "Fetch media metadata by ID. Set verify: true to re-check an existing attachment (stored file decode, metadata, public URL) before using it as featured media.",
       inputSchema: getMediaSchema,
       access: "read",
       dto: { kind: "media" },
     },
     async ({ client, siteId, args }: ToolContext<GetMediaArgs>) => {
-      const item = await client.get<MediaDto>(`/media/${args.id}`);
+      const { verify, ...queryArgs } = args;
+      const item = await client.get<MediaDto>(`/media/${args.id}`, {
+        ...wpArgs(queryArgs),
+        verify: verify ? 1 : undefined,
+      });
       return {
         content: [{ type: "text", text: JSON.stringify(item, null, 2) }],
         structuredContent: withSiteMeta(siteId, item),
@@ -1106,10 +1112,30 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
 
   const uploadMediaSchema = z.object({
     site: siteSchema,
-    file_name: z.string().min(1),
-    mime_type: z.string().min(1),
+    title: z.string().min(1).describe("Human-readable image subject. With image_type, WordPress builds the stored filename as slug(title)-slug(image_type).ext."),
+    image_type: z
+      .string()
+      .regex(/^[a-z0-9]([a-z0-9-]{0,31})?$/)
+      .describe("Image role for the filename slug, e.g. featured, gallery, inline, hero, og."),
+    file_name: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Legacy fallback only when title and image_type are omitted. Prefer title + image_type."),
+    mime_type: z
+      .string()
+      .optional()
+      .describe("Deprecated advisory hint. WordPress detects the real MIME type from file bytes."),
     content_base64: z.string().min(1),
-    title: z.string().optional(),
+    alt_text: z.string().optional(),
+    caption: z.string().optional(),
+    description: z.string().optional(),
+    post_id: z.number().int().positive().optional().describe("Optional post ID to attach as featured image after verification passes."),
+    set_featured: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("When true with post_id, sets the featured image only after all upload verification passes."),
   });
   type UploadMediaArgs = z.infer<typeof uploadMediaSchema>;
 
@@ -1121,15 +1147,24 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       name: "wordpress_upload_media",
       title: "Upload WordPress media",
       description:
-        "Upload a file to the media library from base64-encoded content. Check wordpress_get_site_limits first — WordPress's own PHP limits (not MCP) determine the real max upload size.",
+        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256), verifies stored file, metadata, subsizes, and public URL before returning. Use attachment ID only when verification.passed is true. Call wordpress_get_site for upload limits. Optionally set featured image with post_id + set_featured after verification passes.",
       inputSchema: uploadMediaSchema,
       access: "write",
       dto: { kind: "media" },
     },
     async ({ client, siteId, args }: ToolContext<UploadMediaArgs>) => {
       const item = await client.post<MediaDto>("/media", wpArgs(args));
+      const verification = item.verification;
+      const passed = verification?.passed === true;
       return {
-        content: [{ type: "text", text: `Uploaded media #${item.id} on site "${siteId}".` }],
+        content: [
+          {
+            type: "text",
+            text: passed
+              ? `Uploaded verified media #${item.id} on site "${siteId}".`
+              : `Uploaded media #${item.id} on site "${siteId}", but verification did not pass.`,
+          },
+        ],
         structuredContent: withSiteMeta(siteId, item),
       };
     },
@@ -1170,18 +1205,6 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
-  const siteSettingsSchema = z.object({ site: siteSchema });
-  type SiteSettingsArgs = z.infer<typeof siteSettingsSchema>;
-
-  registerWordPressTool(
-    server, registry, options,
-    { name: "wordpress_get_site_settings", title: "Get WordPress site settings", description: "Get the curated site settings exposed by this connector. Requires settings.read.", inputSchema: siteSettingsSchema, access: "read", dto: { kind: "settings" } },
-    async ({ client, siteId }: ToolContext<SiteSettingsArgs>) => {
-      const settings = await client.get<SettingsDto>("/settings");
-      return { content: [{ type: "text", text: JSON.stringify(settings, null, 2) }], structuredContent: withSiteMeta(siteId, settings) };
-    },
-  );
-
   const updateSiteSettingsSchema = z.object({
     site: siteSchema, blogname: z.string().optional(), blogdescription: z.string().optional(), timezone_string: z.string().optional(), date_format: z.string().optional(), time_format: z.string().optional(), start_of_week: z.number().int().min(0).max(6).optional(), posts_per_page: z.number().int().min(1).max(100).optional(), blog_public: z.boolean().optional(), default_comment_status: z.enum(["open", "closed"]).optional(), default_ping_status: z.enum(["open", "closed"]).optional(), permalink_structure: z.string().optional(), confirm: z.boolean().optional().default(false),
   });
@@ -1200,12 +1223,23 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
 
   const siteOperationSchema = z.object({ site: siteSchema });
   type SiteOperationArgs = z.infer<typeof siteOperationSchema>;
-  for (const [name, title, path] of [["wordpress_get_site_health", "Get WordPress site health", "/site/health"], ["wordpress_get_update_status", "Get WordPress update status", "/updates"], ["wordpress_list_navigation_menus", "List WordPress navigation menus", "/navigation/menus"]] as const) {
-    registerWordPressTool(server, registry, options, { name, title, description: title, inputSchema: siteOperationSchema, access: "read" }, async ({ client, siteId }: ToolContext<SiteOperationArgs>) => {
-      const result = await client.get<Record<string, unknown>>(path);
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_list_navigation_menus",
+      title: "List WordPress navigation menus",
+      description: "List navigation menus registered on the site.",
+      inputSchema: siteOperationSchema,
+      access: "read",
+    },
+    async ({ client, siteId }: ToolContext<SiteOperationArgs>) => {
+      const result = await client.get<Record<string, unknown>>("/navigation/menus");
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) };
-    });
-  }
+    },
+  );
 
   const maintenanceSchema = z.object({ site: siteSchema, enabled: z.boolean(), confirm: z.boolean().optional().default(false) });
   type MaintenanceArgs = z.infer<typeof maintenanceSchema>;
@@ -1232,16 +1266,141 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   registerWordPressTool(server, registry, options, { name: "wordpress_restore_revision", title: "Restore WordPress revision", description: "Restore a content revision. Requires matching *.revisions.restore scope and confirm: true.", inputSchema: revisionSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<RevisionArgs>) => {
     if (!args.confirm) return confirmationRequired(`Restoring revision #${args.id} on "${siteId}" overwrites current content. Re-run with confirm: true.`, withSiteMeta(siteId, { id: args.id })); const result = await client.post<Record<string, unknown>>(`/revisions/${args.id}/restore`, {}); return { content: [{ type: "text", text: `Restored revision #${args.id}.` }], structuredContent: withSiteMeta(siteId, result) };
   });
-  for (const [name, title, path] of [["wordpress_list_redirects", "List redirects", "/redirects"], ["wordpress_get_404_log", "Get 404 log", "/redirects/not-found"]] as const) registerWordPressTool(server, registry, options, { name, title, description: `${title}. Requires redirects.read.`, inputSchema: siteOperationSchema, access: "read" }, async ({ client, siteId }: ToolContext<SiteOperationArgs>) => { const result = await client.get<Record<string, unknown>>(path); return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) }; });
-  const redirectSchema = z.object({ site: siteSchema, source: z.string().min(2), destination: z.string().url(), status: z.union([z.literal(301), z.literal(302), z.literal(307), z.literal(308)]).optional().default(301), confirm: z.boolean().optional().default(false) });
-  type RedirectArgs = z.infer<typeof redirectSchema>;
-  registerWordPressTool(server, registry, options, { name: "wordpress_upsert_redirect", title: "Create or update redirect", description: "Create/update a redirect. Requires redirects.update and confirm: true.", inputSchema: redirectSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<RedirectArgs>) => { if (!args.confirm) return confirmationRequired(`Redirecting "${args.source}" changes public traffic. Re-run with confirm: true.`, withSiteMeta(siteId, { source: args.source, destination: args.destination })); const { confirm: _confirm, ...payload } = wpArgs(args); const result = await client.post<Record<string, unknown>>("/redirects", payload); return { content: [{ type: "text", text: `Saved redirect "${args.source}".` }], structuredContent: withSiteMeta(siteId, result) }; });
-  const deleteRedirectSchema = z.object({ site: siteSchema, source: z.string().min(2), confirm: z.boolean().optional().default(false) });
-  type DeleteRedirectArgs = z.infer<typeof deleteRedirectSchema>;
-  registerWordPressTool(server, registry, options, { name: "wordpress_delete_redirect", title: "Delete redirect", description: "Delete a redirect. Requires redirects.update and confirm: true.", inputSchema: deleteRedirectSchema, access: "delete" }, async ({ client, siteId, args }: ToolContext<DeleteRedirectArgs>) => { if (!args.confirm) return confirmationRequired(`Deleting redirect "${args.source}" changes public traffic. Re-run with confirm: true.`, withSiteMeta(siteId, { source: args.source })); const result = await client.delete<Record<string, unknown>>(`/redirects/${encodeURIComponent(args.source)}`); return { content: [{ type: "text", text: `Deleted redirect "${args.source}".` }], structuredContent: withSiteMeta(siteId, result) }; });
-  const menuSchema = z.object({ site: siteSchema, id: z.number().int().positive().optional(), name: z.string().min(1).optional(), confirm: z.boolean().optional().default(false) });
-  type MenuArgs = z.infer<typeof menuSchema>;
-  for (const [name, title, verb, access] of [["wordpress_create_navigation_menu", "Create navigation menu", "create", "write"], ["wordpress_update_navigation_menu", "Update navigation menu", "update", "write"], ["wordpress_delete_navigation_menu", "Delete navigation menu", "delete", "delete"]] as const) registerWordPressTool(server, registry, options, { name, title, description: `${title}. Requires appearance.update and confirm: true.`, inputSchema: menuSchema, access }, async ({ client, siteId, args }: ToolContext<MenuArgs>) => { if (!args.confirm) return confirmationRequired(`${title} on "${siteId}" changes site navigation. Re-run with confirm: true.`, withSiteMeta(siteId, { id: args.id, name: args.name })); const payload = { ...(args.name ? { name: args.name } : {}) }; const result = verb === "create" ? await client.post<Record<string, unknown>>("/navigation/menus", payload) : verb === "update" ? await client.patch<Record<string, unknown>>(`/navigation/menus/${args.id}`, payload) : await client.delete<Record<string, unknown>>(`/navigation/menus/${args.id}`); return { content: [{ type: "text", text: `${title} on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) }; });
+  const getRedirectsSchema = z.object({
+    site: siteSchema,
+    include_not_found_log: z.boolean().optional().default(false).describe("When true, also returns recent 404 log entries."),
+  });
+  type GetRedirectsArgs = z.infer<typeof getRedirectsSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_get_redirects",
+      title: "Get redirects and optional 404 log",
+      description: "List configured redirects. Set include_not_found_log to also fetch logged 404 requests. Requires redirects.read.",
+      inputSchema: getRedirectsSchema,
+      access: "read",
+    },
+    async ({ client, siteId, args }: ToolContext<GetRedirectsArgs>) => {
+      const redirects = await client.get<Record<string, unknown>>("/redirects");
+      const payload: Record<string, unknown> = { redirects };
+
+      if (args.include_not_found_log) {
+        payload.not_found_log = await client.get<Record<string, unknown>>("/redirects/not-found");
+      }
+
+      return {
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
+        structuredContent: withSiteMeta(siteId, payload),
+      };
+    },
+  );
+
+  const manageRedirectSchema = z.object({
+    site: siteSchema,
+    action: z.enum(["upsert", "delete"]),
+    source: z.string().min(2),
+    destination: z.string().url().optional().describe("Required when action is upsert."),
+    status: z.union([z.literal(301), z.literal(302), z.literal(307), z.literal(308)]).optional().default(301),
+    confirm: z.boolean().optional().default(false),
+  });
+  type ManageRedirectArgs = z.infer<typeof manageRedirectSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_manage_redirect",
+      title: "Create, update, or delete a redirect",
+      description: "Upsert or delete a redirect rule. Requires redirects.update and confirm: true.",
+      inputSchema: manageRedirectSchema,
+      access: "delete",
+    },
+    async ({ client, siteId, args }: ToolContext<ManageRedirectArgs>) => {
+      const actionLabel = args.action === "upsert" ? "Save redirect" : "Delete redirect";
+
+      if (args.action === "upsert" && !args.destination) {
+        return executionError(new Error("destination is required when action is upsert."));
+      }
+
+      if (!args.confirm) {
+        return confirmationRequired(
+          `${actionLabel} "${args.source}" on site "${siteId}" changes public traffic. Re-run with confirm: true.`,
+          withSiteMeta(siteId, {
+            action: args.action,
+            source: args.source,
+            ...(args.destination ? { destination: args.destination } : {}),
+          }),
+        );
+      }
+
+      const result = args.action === "upsert"
+        ? await client.post<Record<string, unknown>>("/redirects", {
+            source: args.source,
+            destination: args.destination,
+            status: args.status,
+          })
+        : await client.delete<Record<string, unknown>>(`/redirects/${encodeURIComponent(args.source)}`);
+
+      return {
+        content: [{ type: "text", text: args.action === "upsert" ? `Saved redirect "${args.source}".` : `Deleted redirect "${args.source}".` }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
+
+  const manageNavigationMenuSchema = z.object({
+    site: siteSchema,
+    action: z.enum(["create", "update", "delete"]),
+    id: z.number().int().positive().optional().describe("Required for update and delete."),
+    name: z.string().min(1).optional().describe("Menu name for create or update."),
+    confirm: z.boolean().optional().default(false),
+  });
+  type ManageNavigationMenuArgs = z.infer<typeof manageNavigationMenuSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_manage_navigation_menu",
+      title: "Create, update, or delete a navigation menu",
+      description: "Manage navigation menus. Requires appearance.update and confirm: true.",
+      inputSchema: manageNavigationMenuSchema,
+      access: "delete",
+    },
+    async ({ client, siteId, args }: ToolContext<ManageNavigationMenuArgs>) => {
+      const titles: Record<ManageNavigationMenuArgs["action"], string> = {
+        create: "Create navigation menu",
+        update: "Update navigation menu",
+        delete: "Delete navigation menu",
+      };
+      const title = titles[args.action];
+
+      if ((args.action === "update" || args.action === "delete") && !args.id) {
+        return executionError(new Error("id is required for update and delete."));
+      }
+
+      if (!args.confirm) {
+        return confirmationRequired(`${title} on "${siteId}" changes site navigation. Re-run with confirm: true.`, withSiteMeta(siteId, { action: args.action, id: args.id, name: args.name }));
+      }
+
+      const payload = args.name ? { name: args.name } : {};
+      const result = args.action === "create"
+        ? await client.post<Record<string, unknown>>("/navigation/menus", payload)
+        : args.action === "update"
+          ? await client.patch<Record<string, unknown>>(`/navigation/menus/${args.id}`, payload)
+          : await client.delete<Record<string, unknown>>(`/navigation/menus/${args.id}`);
+
+      return {
+        content: [{ type: "text", text: `${title} on "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
 
   const getRobotsSchema = z.object({ site: siteSchema });
   type GetRobotsArgs = z.infer<typeof getRobotsSchema>;
@@ -1307,66 +1466,43 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
-  const seoAuditSchema = z.object({
+  const getSeoSchema = z.object({
     site: siteSchema,
     post_id: z.number().int().positive(),
+    audit: z.boolean().optional().default(false).describe("When true, also run on-site SEO audit checks for this post."),
   });
-  type SeoAuditArgs = z.infer<typeof seoAuditSchema>;
+  type GetSeoArgs = z.infer<typeof getSeoSchema>;
 
   registerWordPressTool(
     server,
     registry,
     options,
     {
-      name: "wordpress_seo_audit",
-      title: "Audit a post/page for SEO issues",
+      name: "wordpress_get_seo",
+      title: "Get SEO metadata and optional audit",
       description:
-        "Checks a single post or page for missing title/description, noindex, heading structure issues, missing image alt text, and possibly-broken internal links. On-site only — no Google Search Console/Analytics data.",
-      inputSchema: seoAuditSchema,
-      access: "read",
-      dto: { kind: "seo_audit" },
-    },
-    async ({ client, siteId, args }: ToolContext<SeoAuditArgs>) => {
-      const result = await client.get<SeoAuditDto>("/seo/audit", { id: args.post_id });
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              result.findings.length === 0
-                ? `No SEO issues found for post #${args.post_id} on site "${siteId}".`
-                : `${result.findings.length} SEO issue(s) found for post #${args.post_id} on site "${siteId}".`,
-          },
-        ],
-        structuredContent: withSiteMeta(siteId, { post_id: args.post_id, ...result }),
-      };
-    },
-  );
-
-  const getSeoMetadataSchema = z.object({
-    site: siteSchema,
-    post_id: z.number().int().positive(),
-  });
-  type GetSeoMetadataArgs = z.infer<typeof getSeoMetadataSchema>;
-
-  registerWordPressTool(
-    server,
-    registry,
-    options,
-    {
-      name: "wordpress_get_seo_metadata",
-      title: "Get SEO metadata for a post/page",
-      description:
-        "Returns title, meta description, canonical URL, Open Graph fields, and noindex status for a post or page — read from Yoast/Rank Math if active, otherwise from this plugin's own fields.",
-      inputSchema: getSeoMetadataSchema,
+        "Returns title, meta description, canonical, Open Graph, and noindex for a post or page. Set audit: true to include on-site SEO issue findings.",
+      inputSchema: getSeoSchema,
       access: "read",
       dto: { kind: "seo_metadata" },
     },
-    async ({ client, siteId, args }: ToolContext<GetSeoMetadataArgs>) => {
+    async ({ client, siteId, args }: ToolContext<GetSeoArgs>) => {
       const metadata = await client.get<SeoMetadataDto>(`/seo/metadata/${args.post_id}`);
+      const payload: Record<string, unknown> = { ...metadata };
+
+      if (args.audit) {
+        const audit = await client.get<SeoAuditDto>("/seo/audit", { id: args.post_id });
+        payload.audit = audit;
+      }
+
       return {
-        content: [{ type: "text", text: JSON.stringify(metadata, null, 2) }],
-        structuredContent: withSiteMeta(siteId, metadata),
+        content: [{
+          type: "text",
+          text: args.audit && (payload.audit as SeoAuditDto)?.findings?.length
+            ? `${(payload.audit as SeoAuditDto).findings.length} SEO issue(s) for post #${args.post_id}.`
+            : JSON.stringify(payload, null, 2),
+        }],
+        structuredContent: withSiteMeta(siteId, { post_id: args.post_id, ...payload }),
       };
     },
   );
@@ -1380,32 +1516,37 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     noindex: z.boolean().optional(),
   };
 
-  const updateSeoMetadataSchema = z.object({
+  const updateSeoSchema = z.object({
     site: siteSchema,
     post_id: z.number().int().positive(),
     ...seoMetadataFieldsSchema,
+    apply_fixes: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("When true, applies the provided fields as a batch fix (same as audit-driven fixes)."),
     confirm: z
       .boolean()
       .optional()
       .default(false)
       .describe("Required to confirm the change. Re-run with true after the user approves the diff."),
   });
-  type UpdateSeoMetadataArgs = z.infer<typeof updateSeoMetadataSchema>;
+  type UpdateSeoArgs = z.infer<typeof updateSeoSchema>;
 
   registerWordPressTool(
     server,
     registry,
     options,
     {
-      name: "wordpress_update_seo_metadata",
+      name: "wordpress_update_seo",
       title: "Update SEO metadata for a post/page",
       description:
-        "Sets title, meta description, canonical URL, Open Graph fields, and/or noindex for a post or page. Only provided fields change. Always requires confirm: true after reviewing the proposed diff.",
-      inputSchema: updateSeoMetadataSchema,
+        "Sets SEO fields on a post or page. Use apply_fixes: true to apply a batch of fixes in one call. Always requires confirm: true after reviewing the proposed diff.",
+      inputSchema: updateSeoSchema,
       access: "write",
       dto: { kind: "seo_metadata" },
     },
-    async ({ client, siteId, args }: ToolContext<UpdateSeoMetadataArgs>) => {
+    async ({ client, siteId, args }: ToolContext<UpdateSeoArgs>) => {
       const current = await client.get<SeoMetadataDto>(`/seo/metadata/${args.post_id}`);
       const changes = computeSeoChanges(current, args);
 
@@ -1416,55 +1557,13 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
         );
       }
 
-      const { confirm: _confirm, post_id: _postId, site: _site, ...fields } = args;
-      const result = await client.patch<SeoMetadataDto>(`/seo/metadata/${args.post_id}`, fields);
+      const { confirm: _confirm, post_id: _postId, site: _site, apply_fixes: _applyFixes, ...fields } = args;
+      const result = args.apply_fixes
+        ? await client.post<SeoMetadataDto>(`/seo/fix/${args.post_id}`, { changes: fields })
+        : await client.patch<SeoMetadataDto>(`/seo/metadata/${args.post_id}`, fields);
+
       return {
         content: [{ type: "text", text: `Updated SEO metadata for post #${args.post_id} on site "${siteId}".` }],
-        structuredContent: withSiteMeta(siteId, result),
-      };
-    },
-  );
-
-  const seoFixSchema = z.object({
-    site: siteSchema,
-    post_id: z.number().int().positive(),
-    ...seoMetadataFieldsSchema,
-    confirm: z
-      .boolean()
-      .optional()
-      .default(false)
-      .describe("Required to confirm the change. Re-run with true after the user approves the diff."),
-  });
-  type SeoFixArgs = z.infer<typeof seoFixSchema>;
-
-  registerWordPressTool(
-    server,
-    registry,
-    options,
-    {
-      name: "wordpress_seo_fix",
-      title: "Apply SEO fixes to a post/page",
-      description:
-        "Applies a set of SEO metadata fixes (typically the output of wordpress_seo_audit) to a post or page in one call. Always requires confirm: true after reviewing the proposed diff.",
-      inputSchema: seoFixSchema,
-      access: "write",
-      dto: { kind: "seo_metadata" },
-    },
-    async ({ client, siteId, args }: ToolContext<SeoFixArgs>) => {
-      const current = await client.get<SeoMetadataDto>(`/seo/metadata/${args.post_id}`);
-      const changes = computeSeoChanges(current, args);
-
-      if (!args.confirm) {
-        return confirmationRequired(
-          `Applying SEO fixes to post #${args.post_id} on site "${siteId}". Review the proposed changes, then re-run with confirm: true to proceed.`,
-          withSiteMeta(siteId, { post_id: args.post_id, changes }),
-        );
-      }
-
-      const { confirm: _confirm, post_id: _postId, site: _site, ...fields } = args;
-      const result = await client.post<SeoMetadataDto>(`/seo/fix/${args.post_id}`, { changes: fields });
-      return {
-        content: [{ type: "text", text: `Applied SEO fixes to post #${args.post_id} on site "${siteId}".` }],
         structuredContent: withSiteMeta(siteId, result),
       };
     },

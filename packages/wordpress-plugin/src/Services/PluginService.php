@@ -107,6 +107,14 @@ final class PluginService
     /**
      * @return array{plugin: array<string, bool|string>|null, error: string|null}
      */
+    public function setState(string $plugin, bool $enabled): array
+    {
+        return $enabled ? $this->activate($plugin) : $this->deactivate($plugin);
+    }
+
+    /**
+     * @return array{plugin: array<string, bool|string>|null, error: string|null}
+     */
     public function update(string $plugin): array
     {
         if (! $this->exists($plugin)) {

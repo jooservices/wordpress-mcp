@@ -66,6 +66,22 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
       wordpress_version: "6.8",
       timezone: "UTC",
       supported_capabilities: ["posts.read"],
+      limits: {
+        upload_max_filesize: "8M",
+        post_max_size: "16M",
+        memory_limit: "256M",
+        max_execution_time: "120",
+        wp_max_upload_size_bytes: 8388608,
+      },
+      core_update_available: false,
+      core_update_version: null,
+      maintenance_enabled: false,
+      is_multisite: false,
+      active_theme: { stylesheet: "twentytwentyfive", name: "Twenty Twenty-Five", version: "1.0" },
+      active_plugins_count: 1,
+      settings: null,
+      health: null,
+      updates: null,
       internal_secret: "must never leak",
     });
   }
@@ -119,12 +135,9 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
     return json({ plugin: "hello-dolly/hello.php", name: "Hello Dolly", version: "1.7.2", active: false, update_available: false });
   }
 
-  if (rel === "/plugins/activate" && method === "POST") {
-    return json({ ...plugins[0], active: true });
-  }
-
-  if (rel === "/plugins/deactivate" && method === "POST") {
-    return json({ ...plugins[0], active: false });
+  if (rel === "/plugins/state" && method === "POST") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    return json({ ...plugins[0], active: payload.enabled === true });
   }
 
   if (rel === "/plugins/update" && method === "POST") {
@@ -300,15 +313,15 @@ describe("safety gates", () => {
   });
 });
 
-describe("wordpress_preview_content_update", () => {
+describe("wordpress_update_content preview", () => {
   it("returns the field-level diff without mutating anything", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_preview_content_update",
-      arguments: { site: "abc", id: 42, title: "New title", status: "publish", tags: ["Featured", "Hot"] },
+      name: "wordpress_update_content",
+      arguments: { site: "abc", id: 42, preview: true, title: "New title", status: "publish", tags: ["Featured", "Hot"] },
     });
 
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toMatchObject({ site: "abc", id: 42 });
+    expect(result.structuredContent).toMatchObject({ site: "abc", id: 42, preview: true });
     const changes = result.structuredContent?.changes as Array<{ field: string }>;
     expect(changes.map((change) => change.field).sort()).toEqual(["status", "tags", "title"]);
     expect(ctx.calls.filter((call) => call.method === "PATCH")).toHaveLength(0);
@@ -316,8 +329,8 @@ describe("wordpress_preview_content_update", () => {
 
   it("reports no changes when the payload matches", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_preview_content_update",
-      arguments: { site: "abc", id: 42, title: "Draft post" },
+      name: "wordpress_update_content",
+      arguments: { site: "abc", id: 42, preview: true, title: "Draft post" },
     });
 
     expect(result.isError).toBeUndefined();
@@ -326,8 +339,8 @@ describe("wordpress_preview_content_update", () => {
 
   it("never leaks fields outside the content DTO whitelist", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_preview_content_update",
-      arguments: { site: "abc", id: 42, title: "New" },
+      name: "wordpress_update_content",
+      arguments: { site: "abc", id: 42, preview: true, title: "New" },
     });
 
     const current = result.structuredContent?.current as Record<string, unknown>;
@@ -359,8 +372,8 @@ describe("featured media", () => {
 
   it("shows featured-image removal in the preview diff", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_preview_content_update",
-      arguments: { site: "abc", id: 42, featured_media: 0 },
+      name: "wordpress_update_content",
+      arguments: { site: "abc", id: 42, preview: true, featured_media: 0 },
     });
 
     expect(result.structuredContent?.changes).toEqual([{ field: "featured_media", from: 17, to: 0 }]);
@@ -400,12 +413,12 @@ describe("plugin management", () => {
 
   it("requires confirmation before activating a plugin", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_activate_plugin",
-      arguments: { site: "abc", plugin: "akismet/akismet.php" },
+      name: "wordpress_manage_plugin",
+      arguments: { site: "abc", action: "state", plugin: "akismet/akismet.php", enabled: true },
     });
 
     expect(result.isError).toBe(true);
-    expect(result.structuredContent).toMatchObject({ confirmation_required: true, action: "activate" });
+    expect(result.structuredContent).toMatchObject({ confirmation_required: true, action: "state", enabled: true });
   });
 });
 
@@ -523,16 +536,16 @@ describe("request-id correlation", () => {
 
 describe("observability tools", () => {
   it("returns request stats for a site", async () => {
-    const result = await ctx.client.callTool({ name: "wordpress_get_mcp_stats", arguments: { site: "abc" } });
+    const result = await ctx.client.callTool({ name: "wordpress_get_mcp_activity", arguments: { site: "abc", mode: "stats" } });
 
     expect(result.isError).toBeUndefined();
-    expect(result.structuredContent).toMatchObject({ site: "abc", total: 5, success: 4, error: 1 });
+    expect(result.structuredContent).toMatchObject({ site: "abc", mode: "stats", total: 5, success: 4, error: 1 });
   });
 
   it("returns a paginated request log for a site", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_get_mcp_request_log",
-      arguments: { site: "abc", action: "read" },
+      name: "wordpress_get_mcp_activity",
+      arguments: { site: "abc", mode: "logs", action: "read" },
     });
 
     expect(result.isError).toBeUndefined();
@@ -572,16 +585,17 @@ describe("SEO tools", () => {
   });
 
   it("runs an SEO audit for a post", async () => {
-    const result = await ctx.client.callTool({ name: "wordpress_seo_audit", arguments: { site: "abc", post_id: 42 } });
+    const result = await ctx.client.callTool({ name: "wordpress_get_seo", arguments: { site: "abc", post_id: 42, audit: true } });
 
     expect(result.isError).toBeUndefined();
-    const findings = (result.structuredContent as Record<string, unknown>).findings as Array<Record<string, unknown>>;
+    const audit = (result.structuredContent as Record<string, unknown>).audit as Record<string, unknown>;
+    const findings = audit.findings as Array<Record<string, unknown>>;
     expect(findings[0]).toMatchObject({ code: "missing_description" });
   });
 
   it("blocks updating SEO metadata without confirmation and returns a diff", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_update_seo_metadata",
+      name: "wordpress_update_seo",
       arguments: { site: "abc", post_id: 42, title: "New title" },
     });
 
@@ -595,7 +609,7 @@ describe("SEO tools", () => {
 
   it("updates SEO metadata when confirmed", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_update_seo_metadata",
+      name: "wordpress_update_seo",
       arguments: { site: "abc", post_id: 42, title: "New title", confirm: true },
     });
 
@@ -605,7 +619,7 @@ describe("SEO tools", () => {
 
   it("applies SEO fixes when confirmed", async () => {
     const result = await ctx.client.callTool({
-      name: "wordpress_seo_fix",
+      name: "wordpress_update_seo",
       arguments: { site: "abc", post_id: 42, description: "Fixed description", confirm: true },
     });
 
