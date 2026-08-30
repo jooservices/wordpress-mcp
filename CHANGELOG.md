@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - Unreleased
+
+### Added
+
+- **Protocol DTO layer** in the MCP server: WordPress payloads are whitelisted per resource kind (content, comment, term, media, site) before reaching MCP clients — plugin fields added in the future can no longer leak automatically
+- **Safety gates**: `wordpress_update_content` requires `confirm: true` to transition content to `publish`, and `wordpress_delete_content` requires `confirm: true` for trash or permanent delete; a refused call returns `confirmation_required` with the proposed changes so the client can surface them to the user before re-running
+- **Content diff preview**: new `wordpress_preview_content_update` read tool returns the field-level changes an update would apply (title, content, excerpt, slug, status, categories, tags) without mutating anything
+- **Resource discovery**: WordPress entities are browsable as MCP resources — `wordpress://sites/{siteId}`, `wordpress://content/{siteId}/{id}`, `wordpress://comments/{siteId}/{id}`, `wordpress://media/{siteId}/{id}`, `wordpress://terms/{siteId}/{taxonomy}` — with the same DTO whitelists and per-tool policy applied to the resource surface
+- **Semantic search**: `wordpress_search_content` accepts `author_name`, `category_name`, `tag_name`, and `meta_key` + `meta_value` filters (plugin maps them to `WP_Query` author/taxonomy/meta queries)
+- **Session-aware workflows**: `wordpress_set_active_site` sets a per-session default site; the `site` parameter can then be omitted on every tool call
+- **Tool allowlist**: `MCP_ENABLED_TOOLS` restricts the server to a whitelist of tools (takes precedence over `MCP_DISABLED_TOOLS`)
+- **MCP protocol version negotiation** (`2025-11-25` down to `2024-10-07`) with `MCP_PROTOCOL_VERSION_POLICY=fallback|reject`
+- **Per-tool policy**: every tool declares an access level (read/write/delete); `MCP_DISABLED_TOOLS` disables tools by name
+- **Event-based observability**: structured JSON events (`mcp.initialize`, `mcp.tool.call`, `mcp.tool.denied`, `mcp.session.evicted`) with failure reasons and duration; toggle via `MCP_OBSERVABILITY_ENABLED`
+- **Session manager** with concurrent-session cap (`MCP_MAX_SESSIONS`) and idle eviction (`MCP_SESSION_IDLE_MS`) — closes an anonymous session-spam DoS vector in Mixed auth mode
+- `FailureReason` taxonomy mapping site/API errors to stable reason codes
+- **SEO tools** (on-site only, no external API calls): `wordpress_get_robots` / `wordpress_update_robots` (robots.txt, confirm-gated), `wordpress_seo_audit` (missing title/description, noindex, heading structure, missing image alt text, possibly-broken internal links), `wordpress_get_seo_metadata` / `wordpress_update_seo_metadata` / `wordpress_seo_fix` (title, meta description, canonical, Open Graph, noindex — auto-detects Yoast/Rank Math, falls back to the plugin's own fields otherwise)
+- **MCP request observability**: an `X-Request-Id` header now correlates a tool call across the MCP server's own event log and the WordPress site's audit log for the same request; every REST endpoint (not just mutations) now logs to the audit log with duration; new `wordpress_get_mcp_stats` and `wordpress_get_mcp_request_log` read tools; audit log retention (`MCP_LOG_RETENTION_DAYS`, default 90) via a daily cron purge; the WordPress admin Audit Log page gained filters, a summary, and CSV export
+- `wordpress_get_site_limits` reports the site's real PHP limits (`upload_max_filesize`, `post_max_size`, `memory_limit`, `max_execution_time`) and WordPress's effective max upload size, so MCP no longer needs to guess at a content-size ceiling
+
+### Changed
+
+- Tool execution pipeline unified: permission → site resolution (with per-session active site) → handler → DTO sanitization → observability (single decorator, no per-tool duplication)
+- A tool's access level (read/write/delete) is now declared once, at registration, and shared by both permission enforcement and `tools/list` `securitySchemes` — replaces a separately hand-maintained lookup table that could drift from the tool's real behavior
+- `MCP_DISABLED_TOOLS` / `MCP_ENABLED_TOOLS` policy also applies to the MCP resource surface (each resource mirrors its read/list tool)
+- Error tool results are no longer DTO-sanitized, so safety-gate results keep their `changes` and `confirmation_required` payloads
+- Site-resolution errors now suggest `wordpress_set_active_site` as an alternative to passing `site` on every call
+- Server `version` reported to MCP clients bumped to 1.2.0
+- Product renamed from "JOOservices ChatGPT Connector" to "JOOservices WordPress - MCP" (plugin header, admin UI, docs); MCP server protocol identifier changed to `wordpress-mcp`. Plugin slug/main file (`wordpress-chatgpt.php`) and REST namespace are unchanged for backward compatibility.
+- MCP server base image bumped to Node 24 (current LTS); `engines.node >= 24`
+- MCP's JSON body size limit is now configurable (`MCP_JSON_BODY_LIMIT`, default 100 MB) and is a backstop only — WordPress's own PHP limits are the real ceiling (see `wordpress_get_site_limits`)
+
+### Fixed
+
+- Media upload no longer trusts the client-declared MIME type: content is sniffed with `wp_check_filetype_and_ext`, executable/active-content extensions are rejected before write, and mismatched uploads are deleted (plugin)
+- `last_used_at` is only written once per 60 s per connection instead of on every authenticated request (plugin performance)
+- A new write/delete tool that forgot to register an access level could previously bypass the OAuth write-scope check entirely (fail-open default); access is now a required part of registering a tool, so this can no longer happen
+- Session eviction under the `MCP_MAX_SESSIONS` cap now closes the evicted session's transport instead of leaking it
+- `assertToolPermission` no longer throws for disabled/not-allowlisted tools — it returns a denial result like every other policy check, so `mcp.tool.denied` now fires consistently instead of being swallowed by the generic error handler for those two cases
+- A denied or failing resource kind (e.g. a disabled tool's `wordpress://...` mirror) no longer blanks out every other resource kind in the same `resources/list` response
+- The content DTO's `author`/`categories`/`tags` fields are now projected field-by-field too, not just the top-level record — closes a nested-field leak path
+- `MCP_MAX_SESSIONS`-triggered session eviction now emits `mcp.session.evicted` like idle eviction already did
+- Tag comparison in the content-update diff preview is now case-insensitive, matching WordPress's own tag uniqueness rules
+- `MediaService` no longer accepts any declared MIME type when the real content sniffs as `application/octet-stream`
+- `wordpress_search_content`'s `meta_key`/`meta_value` filter no longer allows querying protected (`_`-prefixed) postmeta
+
+### Security
+
+- WordPress upload path hardened against executable file upload via the MCP media tool
+- Media upload's MIME-spoofing check can no longer be bypassed via an `application/octet-stream` sniff result paired with an arbitrary declared MIME type
+- `wordpress_search_content`'s `meta_key` filter can no longer be used as an oracle to probe another plugin's protected postmeta
+
 ## [1.1.0] - 2026-08-30
 
 ### Added

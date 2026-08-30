@@ -78,7 +78,7 @@ services:
     tty: true
 
   node:
-    image: node:22-bookworm-slim
+    image: node:24-bookworm-slim
     working_dir: /app/packages/mcp-server
     volumes:
       - .:/app
@@ -87,7 +87,7 @@ services:
     profiles: ["ci"]
 
   integration:
-    image: node:22-bookworm-slim
+    image: node:24-bookworm-slim
     working_dir: /app/packages/mcp-server
     volumes:
       - .:/app

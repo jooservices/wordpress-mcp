@@ -26,7 +26,7 @@ install:
 ci: build
 	$(PHP) composer install --no-interaction
 	$(PHP) composer ci
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:22-bookworm-slim sh -c "npm install && npm run ci"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm run ci"
 
 test: test-php test-mcp
 
@@ -34,11 +34,11 @@ test-php:
 	$(PHP) composer test
 
 test-mcp:
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:22-bookworm-slim sh -c "npm install && npm test"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm test"
 
 lint:
 	$(PHP) composer lint:all
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:22-bookworm-slim sh -c "npm install && npm run lint"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm run lint"
 
 integration:
 	$(DOCKER_COMPOSE) --profile integration run --rm integration

@@ -12,5 +12,5 @@ export function unknownSiteMessage(siteId: string, knownIds: string[]): string {
 
 export function siteRequiredMessage(knownIds: string[]): string {
   const known = knownIds.map((id) => `"${id}"`).join(", ");
-  return `Multiple WordPress sites are configured. Pass the "site" parameter (${known}). Call wordpress_list_sites first.`;
+  return `Multiple WordPress sites are configured. Pass the "site" parameter (${known}), or call wordpress_set_active_site once per session to set a default. Call wordpress_list_sites first.`;
 }

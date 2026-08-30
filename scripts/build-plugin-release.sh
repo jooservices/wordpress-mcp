@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLUGIN_SRC="$ROOT/packages/wordpress-plugin"
 STAGE="$ROOT/build/wordpress-chatgpt"
-ZIP="$ROOT/build/wordpress-chatgpt-1.1.0.zip"
+VERSION="$(sed -n 's/^ \* Version: *//p' "$PLUGIN_SRC/wordpress-chatgpt.php" | head -1)"
+ZIP="$ROOT/build/wordpress-chatgpt-${VERSION}.zip"
 
 rm -rf "$STAGE" "$ZIP"
 mkdir -p "$STAGE"

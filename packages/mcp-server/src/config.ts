@@ -1,4 +1,5 @@
 import type { AuthMode } from "./auth/types.js";
+import type { ProtocolVersionPolicy } from "./mcp/versionNegotiator.js";
 import { loadWordPressSites } from "./sites/loadSites.js";
 import type { WordPressSiteConfig } from "./sites/types.js";
 
@@ -14,6 +15,13 @@ export interface Config {
   oauthDataDir: string;
   port: number;
   host: string;
+  mcpDisabledTools: Set<string>;
+  mcpEnabledTools: Set<string> | undefined;
+  mcpProtocolVersionPolicy: ProtocolVersionPolicy;
+  mcpObservabilityEnabled: boolean;
+  mcpMaxSessions: number;
+  mcpSessionIdleMs: number;
+  mcpJsonBodyLimit: string;
 }
 
 function parseAuthMode(raw: string | undefined, authDisabled: boolean): AuthMode {
@@ -27,6 +35,29 @@ function parseAuthMode(raw: string | undefined, authDisabled: boolean): AuthMode
   }
 
   return "mixed";
+}
+
+function parseDisabledTools(raw: string | undefined): Set<string> {
+  const tools = (raw ?? "")
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter((tool) => tool !== "");
+
+  return new Set(tools);
+}
+
+function parseEnabledTools(raw: string | undefined): Set<string> | undefined {
+  const tools = parseDisabledTools(raw);
+  return tools.size > 0 ? tools : undefined;
+}
+
+function parseProtocolVersionPolicy(raw: string | undefined): ProtocolVersionPolicy {
+  return raw?.trim().toLowerCase() === "reject" ? "reject" : "fallback";
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
 export function loadConfig(): Config {
@@ -58,5 +89,15 @@ export function loadConfig(): Config {
     oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
     port: Number(process.env.MCP_PORT ?? 3000),
     host: process.env.MCP_HOST ?? "0.0.0.0",
+    mcpDisabledTools: parseDisabledTools(process.env.MCP_DISABLED_TOOLS),
+    mcpEnabledTools: parseEnabledTools(process.env.MCP_ENABLED_TOOLS),
+    mcpProtocolVersionPolicy: parseProtocolVersionPolicy(process.env.MCP_PROTOCOL_VERSION_POLICY),
+    mcpObservabilityEnabled: process.env.MCP_OBSERVABILITY_ENABLED !== "0",
+    mcpMaxSessions: parsePositiveInt(process.env.MCP_MAX_SESSIONS, 100),
+    mcpSessionIdleMs: parsePositiveInt(process.env.MCP_SESSION_IDLE_MS, 30 * 60 * 1000),
+    // A sanity backstop against unbounded buffering, not a business rule — the
+    // real ceiling for uploads/content size is WordPress's own PHP limits
+    // (see wordpress_get_site_limits), which MCP should never pre-empt.
+    mcpJsonBodyLimit: process.env.MCP_JSON_BODY_LIMIT ?? "100mb",
   };
 }

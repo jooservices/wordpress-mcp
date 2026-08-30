@@ -1,10 +1,15 @@
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { securitySchemesForTool } from "./auth.js";
+import { mixedReadSchemes, oauthWriteSchemes, type SecurityScheme } from "../auth/types.js";
+import { getToolAccess } from "./toolPolicy.js";
 
 type ToolsListResult = {
   tools: Array<{ name: string; [key: string]: unknown }>;
 };
+
+function securitySchemesForTool(toolName: string): SecurityScheme[] {
+  return getToolAccess(toolName) === "read" ? mixedReadSchemes : oauthWriteSchemes;
+}
 
 export function patchToolsWithSecuritySchemes(server: McpServer): void {
   const handlers = (server.server as unknown as {

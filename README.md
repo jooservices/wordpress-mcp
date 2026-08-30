@@ -12,12 +12,12 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.1.0
+## About v1.2.0
 
 | | |
 | --- | --- |
-| Status | **v1.1.0 — OAuth persistence + scope hardening** |
-| Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 22) |
+| Status | **v1.2.0 — safety gates, resources, preview diffs, semantic search, session site, tool allowlist** |
+| Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
 | Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
 
@@ -29,13 +29,22 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 - Connection management in wp-admin (hashed tokens, one-time reveal)
 - Rate limiting and audit log for mutating operations
 - Default create = draft; publish gated by scope
+- Upload hardening: content sniffing + executable-extension blocklist
 
 **MCP server**
 
 - One MCP server → one or many WordPress sites (`WORDPRESS_SITES`)
-- 14 purpose-built tools (site registry, content, comments, terms, media)
+- 16 purpose-built tools (site registry, content, comments, terms, media)
+- WordPress entities browsable as MCP resources (`wordpress://sites|content|comments|media|terms`)
+- Safety gates: publish transitions and deletion require `confirm: true`; preview diffs with `wordpress_preview_content_update`
+- Semantic search: filter by author name, category/tag slug, and custom field
+- Session-aware workflows: `wordpress_set_active_site` sets a per-session default site
 - Streamable HTTP transport at `/mcp`
 - OAuth 2.1 Mixed auth (default) or static bearer for dev
+- Protocol DTO whitelists (no internal field leakage to MCP clients)
+- MCP protocol version negotiation (2025-11-25 → 2024-10-07)
+- Per-tool policy: access levels, `MCP_DISABLED_TOOLS`, `MCP_ENABLED_TOOLS` allowlist
+- Event observability (JSON) + session cap/idle eviction
 
 ## Requirements
 
@@ -85,12 +94,14 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | Tool | Access |
 |------|--------|
 | `wordpress_list_sites` | Read |
+| `wordpress_set_active_site` | Read (session default for `site`) |
 | `wordpress_get_site` | Read |
 | `wordpress_search_content` | Read |
 | `wordpress_get_content` | Read |
 | `wordpress_create_content` | Write (draft default) |
-| `wordpress_update_content` | Write |
-| `wordpress_delete_content` | Write (trash by default; `force` for permanent) |
+| `wordpress_update_content` | Write (`confirm: true` required to publish) |
+| `wordpress_preview_content_update` | Read (diff preview before update) |
+| `wordpress_delete_content` | Write (trash by default; `force` for permanent; `confirm: true` required) |
 | `wordpress_list_comments` | Read |
 | `wordpress_get_comment` | Read |
 | `wordpress_moderate_comment` | Write |
@@ -98,6 +109,20 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | `wordpress_list_media` | Read |
 | `wordpress_get_media` | Read |
 | `wordpress_upload_media` | Write (base64, max 10 MB file; MCP accepts up to 15 MB JSON body) |
+
+## MCP resources
+
+Clients can browse WordPress entities without calling tools:
+
+| URI template | Contents |
+|--------------|----------|
+| `wordpress://sites/{siteId}` | Site info |
+| `wordpress://content/{siteId}/{id}` | Post or page |
+| `wordpress://comments/{siteId}/{id}` | Comment |
+| `wordpress://media/{siteId}/{id}` | Media item |
+| `wordpress://terms/{siteId}/{taxonomy}` | Categories or tags |
+
+Resources share the DTO whitelists and per-tool policy: disabling `wordpress_get_content` (or omitting it from `MCP_ENABLED_TOOLS`) also blocks the `wordpress://content/...` resource.
 
 ## Development
 

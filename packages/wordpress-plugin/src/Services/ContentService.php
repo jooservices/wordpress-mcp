@@ -23,6 +23,41 @@ final class ContentService
      */
     public function search(array $params): array
     {
+        $args = $this->buildQueryArgs($params);
+        $page = (int) ($args['paged'] ?? 1);
+        $perPage = (int) ($args['posts_per_page'] ?? 10);
+
+        $query = new WP_Query($args);
+        $items = [];
+
+        foreach ($query->posts as $post) {
+            if ($post instanceof WP_Post) {
+                $items[] = $this->normalizer->summary($post);
+            }
+        }
+
+        return [
+            'items' => $items,
+            'pagination' => [
+                'page' => $page,
+                'per_page' => $perPage,
+                'total' => (int) $query->found_posts,
+                'total_pages' => (int) $query->max_num_pages,
+            ],
+        ];
+    }
+
+    /**
+     * Maps search parameters to WP_Query arguments. Semantic filters:
+     * - category_name / tag_name match by slug (instead of numeric ids)
+     * - author_name matches by user display/login name
+     * - meta_key + meta_value filter on a custom field (both required)
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    public function buildQueryArgs(array $params): array
+    {
         $page = max(1, (int) ($params['page'] ?? 1));
         $perPage = min(50, max(1, (int) ($params['per_page'] ?? 10)));
         $type = sanitize_key((string) ($params['type'] ?? 'post'));
@@ -45,12 +80,38 @@ final class ContentService
             $args['author'] = (int) $params['author'];
         }
 
+        if (! empty($params['author_name'])) {
+            $args['author_name'] = sanitize_text_field((string) $params['author_name']);
+        }
+
         if (! empty($params['category'])) {
             $args['cat'] = (int) $params['category'];
         }
 
+        if (! empty($params['category_name'])) {
+            $args['category_name'] = sanitize_text_field((string) $params['category_name']);
+        }
+
         if (! empty($params['tag'])) {
             $args['tag_id'] = (int) $params['tag'];
+        }
+
+        if (! empty($params['tag_name'])) {
+            $args['tag'] = sanitize_text_field((string) $params['tag_name']);
+        }
+
+        $metaKey = sanitize_key((string) ($params['meta_key'] ?? ''));
+
+        // WordPress REST convention treats underscore-prefixed meta as
+        // protected (hidden from external queries); an authenticated MCP
+        // connection should not be able to use this filter as an oracle to
+        // probe another plugin's protected fields.
+        if ($metaKey !== '' && ! str_starts_with($metaKey, '_') && ! empty($params['meta_value'])) {
+            $args['meta_query'] = [[
+                'key' => $metaKey,
+                'value' => sanitize_text_field((string) $params['meta_value']),
+                'compare' => 'LIKE',
+            ]];
         }
 
         if (! empty($params['date_from'])) {
@@ -61,24 +122,7 @@ final class ContentService
             $args['date_query'][] = ['before' => sanitize_text_field((string) $params['date_to']), 'inclusive' => true];
         }
 
-        $query = new WP_Query($args);
-        $items = [];
-
-        foreach ($query->posts as $post) {
-            if ($post instanceof WP_Post) {
-                $items[] = $this->normalizer->summary($post);
-            }
-        }
-
-        return [
-            'items' => $items,
-            'pagination' => [
-                'page' => $page,
-                'per_page' => $perPage,
-                'total' => (int) $query->found_posts,
-                'total_pages' => (int) $query->max_num_pages,
-            ],
-        ];
+        return $args;
     }
 
     /**

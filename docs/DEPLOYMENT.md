@@ -95,6 +95,13 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_PORT` | No | Default `3000` |
 | `MCP_HOST` | No | Default `0.0.0.0` |
 | `MCP_PUBLISH` | No | Host port mapping (default `127.0.0.1:3000:3000`) |
+| `MCP_DISABLED_TOOLS` | No | Comma-separated tools to disable (e.g. `wordpress_delete_content`) |
+| `MCP_ENABLED_TOOLS` | No | Allowlist: when set, only these tools (and their resource mirrors) can run |
+| `MCP_PROTOCOL_VERSION_POLICY` | No | `fallback` (default) or `reject` for MCP protocol version negotiation |
+| `MCP_OBSERVABILITY_ENABLED` | No | Default on. Structured JSON events per tool call |
+| `MCP_MAX_SESSIONS` | No | Concurrent MCP session cap (default `100`) |
+| `MCP_SESSION_IDLE_MS` | No | Idle session eviction (default `1800000` = 30 min) |
+| `MCP_JSON_BODY_LIMIT` | No | Request body backstop (default `100mb`). WordPress's own PHP limits are the real ceiling — see `wordpress_get_site_limits` |
 | `MCP_DOMAIN` | No**** | Public hostname for `make prod-https` (Caddy/Let's Encrypt) |
 | `ACME_EMAIL` | No**** | Let's Encrypt contact email for `make prod-https` |
 | `NGROK_AUTHTOKEN` | No***** | ngrok token for `make prod-tunnel` only |
@@ -111,7 +118,7 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 
 ## WordPress
 
-Deploy the **JOOservices ChatGPT Connector** plugin separately on each WordPress host. Do not bundle WordPress with the MCP container.
+Deploy the **JOOservices WordPress - MCP** plugin separately on each WordPress host. Do not bundle WordPress with the MCP container.
 
 1. Copy plugin to `wp-content/plugins/wordpress-chatgpt`
 2. Run `composer install --no-dev` inside the plugin directory
@@ -124,7 +131,7 @@ Build release zip: `make plugin-release`
 
 - Each site needs its own connection token and scopes in wp-admin.
 - Site `id` values must be unique, lowercase, 1–63 chars (`a-z`, `0-9`, `-`, `_`).
-- ChatGPT must call `wordpress_list_sites` then pass `site` on every other tool when multiple sites are configured.
+- ChatGPT must call `wordpress_list_sites` then pass `site` on every other tool when multiple sites are configured — or call `wordpress_set_active_site` once per session and omit `site` afterwards.
 - Content IDs are valid only within the site they came from.
 
 ## Database

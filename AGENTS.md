@@ -5,6 +5,6 @@ Follow the JOOservices workspace [`AGENTS.md`](../AGENTS.md) (identity, `soulevi
 
 This file adds project-only rules:
 
-- Monorepo: `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 22).
+- Monorepo: `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24).
 - All dev, test, and CI commands run via Docker (`make` targets).
 - Never commit secrets; dev tokens in `.env.example` are local-only.

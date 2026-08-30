@@ -17,11 +17,3 @@ export const mixedReadSchemes: SecurityScheme[] = [
 export const oauthWriteSchemes: SecurityScheme[] = [
   { type: "oauth2", scopes: [OAUTH_SCOPES.WRITE] },
 ];
-
-export const WRITE_TOOLS = new Set([
-  "wordpress_create_content",
-  "wordpress_update_content",
-  "wordpress_delete_content",
-  "wordpress_moderate_comment",
-  "wordpress_upload_media",
-]);
