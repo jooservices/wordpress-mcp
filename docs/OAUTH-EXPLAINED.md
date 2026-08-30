@@ -23,7 +23,7 @@ OAuth does **not** let you pick individual fine-grained permissions (e.g. publis
 This is the **fine-grained** permission an admin selects when creating a **Connection** in WordPress:
 
 - `posts.read`, `posts.create`, `posts.publish`, `posts.delete`, …
-- `media.upload`, `comments.moderate`, …
+- `media.upload`, `media.embed`, `plugins.install`, `comments.moderate`, …
 
 The connection token lives on the **MCP server** (`WORDPRESS_CONNECTION_TOKEN` or `WORDPRESS_SITES`), and is **never** sent to ChatGPT.
 
@@ -38,7 +38,7 @@ ChatGPT
   → OAuth (read/write)           ← tells ChatGPT whether it has read/write access at all
   → MCP server
   → WordPress connection token   ← fine-grained permissions: publish, delete, upload, …
-  → WordPress
+  → WordPress capabilities + object-level permissions
 ```
 
 **Example:** ChatGPT has OAuth `wordpress.write`, but the WordPress connection does **not** have `posts.publish` → ChatGPT **cannot publish** a post.
@@ -51,5 +51,6 @@ ChatGPT
 | Who picks the fine-grained scopes? | The WordPress admin, when creating a connection |
 | Is publish a separate OAuth permission? | No — it's controlled by the WordPress scope (`posts.publish`) |
 | Is the WordPress token ever exposed to ChatGPT? | No — only the MCP server holds it |
+| Are plugin scopes native WordPress OAuth scopes? | No — they are an additional connector allowlist; WordPress capabilities remain mandatory |
 
 See also: [CHATGPT-SETUP.md](CHATGPT-SETUP.md), [WORDPRESS-SETUP.md](WORDPRESS-SETUP.md).

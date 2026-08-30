@@ -15,7 +15,8 @@ WordPress plugin still uses scoped connection tokens (server-side, not exposed t
 - Publish requires explicit `posts.publish` / `pages.publish` scope
 - Delete requires `posts.delete` / `pages.delete`; defaults to trash unless `force=true`
 - Media upload requires `media.upload` scope, base64 via MCP; MCP's own body limit (`MCP_JSON_BODY_LIMIT`, default 100 MB) is a backstop only — WordPress's real PHP limits are authoritative (see `wordpress_get_site_limits`)
-- robots.txt updates require `site.manage` scope
+- Connector scopes are an additional allowlist, not WordPress-native OAuth scopes: every request also requires the authenticated WordPress user's capability and, where applicable, object-level permission.
+- robots.txt requires `seo.robots.update`; plugin operations use granular `plugins.*` scopes. Plugin installs are WordPress.org-slug-only and every plugin mutation requires MCP confirmation.
 
 ## Safety boundaries
 
@@ -28,7 +29,7 @@ Comment API responses exclude author email addresses (PII minimization).
 - MCP server logs errors without Authorization headers
 - WordPress audit log covers every request (reads, writes, and denials), correlated with the MCP server's own event log via `X-Request-Id`; post bodies truncated in metadata; never stores prompt or token content; retained for `MCP_LOG_RETENTION_DAYS` (default 90), purged daily
 
-## Known limitations (v1.2.1)
+## Known limitations (v1.3.0)
 
 - Built-in OAuth persists clients and tokens to `OAUTH_DATA_DIR` (default `/app/data/oauth`); mount a Docker volume in production
 - Access tokens expire per `OAUTH_TOKEN_TTL_SECONDS`; ChatGPT refreshes silently via `refresh_token` (TTL: `OAUTH_REFRESH_TTL_SECONDS`, default 90 days)

@@ -30,6 +30,50 @@ describe.skipIf(!runIntegration)("integration", () => {
     expect(Array.isArray(body.items)).toBe(true);
   });
 
+  it("lists installed plugins via the management API", async () => {
+    const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins`, {
+      headers: { Authorization: `Bearer ${wpToken}` },
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { items: Array<{ plugin: string }> };
+    expect(body.items.some((plugin) => plugin.plugin === "wordpress-chatgpt/wordpress-chatgpt.php")).toBe(true);
+  });
+
+  it("validates plugin-management action requests before changing the site", async () => {
+    const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/activate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${wpToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ plugin: "missing/missing.php" }),
+    });
+    expect(response.status).toBe(400);
+  });
+
+  it("activates and deactivates an installed plugin", async () => {
+    const headers = {
+      Authorization: `Bearer ${wpToken}`,
+      "Content-Type": "application/json",
+    };
+    const plugin = "hello.php";
+    const activate = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/activate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ plugin }),
+    });
+    expect(activate.status).toBe(200);
+    expect(((await activate.json()) as { active: boolean }).active).toBe(true);
+
+    const deactivate = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/deactivate`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ plugin }),
+    });
+    expect(deactivate.status).toBe(200);
+    expect(((await deactivate.json()) as { active: boolean }).active).toBe(false);
+  });
+
   it("denies WordPress API without token", async () => {
     const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/site`);
     expect(response.status).toBe(401);
@@ -70,6 +114,55 @@ describe.skipIf(!runIntegration)("integration", () => {
     const body = (await response.json()) as { id: number; status: string };
     expect(body.status).toBe("draft");
     expect(body.id).toBeGreaterThan(0);
+  });
+
+  it("uploads an image and attaches it as featured media", async () => {
+    const stamp = Date.now();
+    const headers = {
+      Authorization: `Bearer ${wpToken}`,
+      "Content-Type": "application/json",
+    };
+    const upload = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/media`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        file_name: `featured-${stamp}.gif`,
+        mime_type: "image/gif",
+        content_base64: "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==",
+        title: `Featured image ${stamp}`,
+      }),
+    });
+
+    expect(upload.status).toBe(201);
+    const media = (await upload.json()) as { id: number };
+    expect(media.id).toBeGreaterThan(0);
+
+    const create = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/content`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        type: "post",
+        title: `Featured media integration ${stamp}`,
+        status: "draft",
+        featured_media: media.id,
+      }),
+    });
+
+    expect(create.status).toBe(201);
+    const post = (await create.json()) as { id: number; featured_media: number };
+    expect(post.featured_media).toBe(media.id);
+
+    const fetched = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/content/${post.id}`, { headers });
+    expect(fetched.status).toBe(200);
+    expect(((await fetched.json()) as { featured_media: number }).featured_media).toBe(media.id);
+
+    const clear = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/content/${post.id}`, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ featured_media: 0 }),
+    });
+    expect(clear.status).toBe(200);
+    expect(((await clear.json()) as { featured_media: number }).featured_media).toBe(0);
   });
 });
 

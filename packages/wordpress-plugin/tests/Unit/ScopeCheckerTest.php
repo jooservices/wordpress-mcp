@@ -45,6 +45,9 @@ final class ScopeCheckerTest extends TestCase
         self::assertSame('moderate_comments', ScopeChecker::mapToCapability('comments.read'));
         self::assertSame('moderate_comments', ScopeChecker::mapToCapability('comments.moderate'));
         self::assertSame('upload_files', ScopeChecker::mapToCapability('media.upload'));
+        self::assertSame('upload_files', ScopeChecker::mapToCapability('media.embed'));
+        self::assertSame('activate_plugins', ScopeChecker::mapToCapability('plugins.deactivate'));
+        self::assertSame('promote_users', ScopeChecker::mapToCapability('users.assign_roles'));
         self::assertNull(ScopeChecker::mapToCapability('media.read'));
         self::assertNull(ScopeChecker::mapToCapability('unknown.scope'));
     }

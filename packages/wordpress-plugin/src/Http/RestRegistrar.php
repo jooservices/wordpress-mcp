@@ -11,9 +11,17 @@ use JOOservices\WordPressMcp\Models\Connection;
 use JOOservices\WordPressMcp\Services\CommentService;
 use JOOservices\WordPressMcp\Services\ContentService;
 use JOOservices\WordPressMcp\Services\MediaService;
+use JOOservices\WordPressMcp\Services\NavigationService;
+use JOOservices\WordPressMcp\Services\PluginService;
 use JOOservices\WordPressMcp\Services\SeoService;
+use JOOservices\WordPressMcp\Services\SettingsService;
 use JOOservices\WordPressMcp\Services\StatsService;
+use JOOservices\WordPressMcp\Services\SiteOperationsService;
+use JOOservices\WordPressMcp\Services\RevisionService;
+use JOOservices\WordPressMcp\Services\RedirectService;
 use JOOservices\WordPressMcp\Services\TaxonomyService;
+use JOOservices\WordPressMcp\Services\ThemeService;
+use JOOservices\WordPressMcp\Services\UserService;
 use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Error;
@@ -108,9 +116,143 @@ final class RestRegistrar
         ]);
 
         register_rest_route(self::NAMESPACE, '/media/(?P<id>\d+)', [
-            'methods' => 'GET',
-            'callback' => [$this, 'getMedia'],
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'getMedia'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'PATCH',
+                'callback' => [$this, 'updateMedia'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'DELETE',
+                'callback' => [$this, 'deleteMedia'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/settings', [
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'getSettings'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'PATCH',
+                'callback' => [$this, 'updateSettings'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/navigation/menus', [
+            ['methods' => 'GET', 'callback' => [$this, 'listMenus'], 'permission_callback' => [$this, 'authenticate']],
+            ['methods' => 'POST', 'callback' => [$this, 'createMenu'], 'permission_callback' => [$this, 'authenticate']],
+        ]);
+        register_rest_route(self::NAMESPACE, '/navigation/menus/(?P<id>\d+)', [
+            ['methods' => 'GET', 'callback' => [$this, 'getMenu'], 'permission_callback' => [$this, 'authenticate']],
+            ['methods' => 'PATCH', 'callback' => [$this, 'updateMenu'], 'permission_callback' => [$this, 'authenticate']],
+            ['methods' => 'DELETE', 'callback' => [$this, 'deleteMenu'], 'permission_callback' => [$this, 'authenticate']],
+        ]);
+        register_rest_route(self::NAMESPACE, '/navigation/menus/(?P<menu_id>\d+)/items', [
+            'methods' => 'POST',
+            'callback' => [$this, 'saveMenuItem'],
             'permission_callback' => [$this, 'authenticate'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/navigation/menus/(?P<menu_id>\d+)/items/(?P<id>\d+)', [
+            ['methods' => 'PATCH', 'callback' => [$this, 'saveMenuItem'], 'permission_callback' => [$this, 'authenticate']],
+            ['methods' => 'DELETE', 'callback' => [$this, 'deleteMenuItem'], 'permission_callback' => [$this, 'authenticate']],
+        ]);
+        foreach (
+            [
+                '/navigation/locations' => ['PATCH', 'setMenuLocations'],
+                '/site/health' => ['GET', 'siteHealth'],
+                '/updates' => ['GET', 'updates'],
+                '/updates/core' => ['POST', 'updateCore'],
+                '/maintenance' => ['PATCH', 'maintenance'],
+            ] as $route => [$method, $callback]
+        ) {
+            register_rest_route(self::NAMESPACE, $route, [
+                'methods' => $method,
+                'callback' => [$this, $callback],
+                'permission_callback' => [$this, 'authenticate'],
+            ]);
+        }
+        foreach (
+            [
+                '/content/(?P<id>\d+)/revisions' => ['GET', 'listRevisions'],
+                '/revisions/(?P<id>\d+)' => ['GET', 'getRevision'],
+                '/revisions/(?P<id>\d+)/restore' => ['POST', 'restoreRevision'],
+                '/redirects/(?P<source>.+)' => ['DELETE', 'deleteRedirect'],
+                '/redirects/not-found' => ['GET', 'notFoundLog'],
+            ] as $route => [$method, $callback]
+        ) {
+            register_rest_route(self::NAMESPACE, $route, [
+                'methods' => $method,
+                'callback' => [$this, $callback],
+                'permission_callback' => [$this, 'authenticate'],
+            ]);
+        }
+        register_rest_route(self::NAMESPACE, '/redirects', [
+            ['methods' => 'GET', 'callback' => [$this, 'listRedirects'], 'permission_callback' => [$this, 'authenticate']],
+            ['methods' => 'POST', 'callback' => [$this, 'upsertRedirect'], 'permission_callback' => [$this, 'authenticate']],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/plugins', [
+            'methods' => 'GET',
+            'callback' => [$this, 'listPlugins'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        foreach (['install', 'activate', 'deactivate', 'update', 'delete'] as $action) {
+            register_rest_route(self::NAMESPACE, '/plugins/' . $action, [
+                'methods' => 'POST',
+                'callback' => [$this, 'managePlugin'],
+                'permission_callback' => [$this, 'authenticate'],
+                'args' => ['action' => ['default' => $action]],
+            ]);
+        }
+
+        register_rest_route(self::NAMESPACE, '/themes', [
+            'methods' => 'GET',
+            'callback' => [$this, 'listThemes'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        foreach (['install', 'activate', 'update', 'delete'] as $action) {
+            register_rest_route(self::NAMESPACE, '/themes/' . $action, [
+                'methods' => 'POST',
+                'callback' => [$this, 'manageTheme'],
+                'permission_callback' => [$this, 'authenticate'],
+                'args' => ['action' => ['default' => $action]],
+            ]);
+        }
+
+        register_rest_route(self::NAMESPACE, '/users', [
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'listUsers'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'POST',
+                'callback' => [$this, 'createUser'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/users/(?P<id>\d+)', [
+            [
+                'methods' => 'PATCH',
+                'callback' => [$this, 'updateUser'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'DELETE',
+                'callback' => [$this, 'deleteUser'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
         ]);
 
         register_rest_route(self::NAMESPACE, '/mcp/stats', [
@@ -368,6 +510,14 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
+        if (array_key_exists('featured_media', $payload) && ! $this->canEmbedMedia($connection, $payload['featured_media'])) {
+            return RequestContext::deny();
+        }
+
+        if (! $this->canEmbedContentMedia($connection, $payload)) {
+            return RequestContext::deny();
+        }
+
         $canPublish = ScopeChecker::canPublishContent($connection, $type)
             && ScopeChecker::userCan($connection, $type === ContentTypes::PAGE ? 'pages.publish' : 'posts.publish');
 
@@ -441,6 +591,14 @@ final class RestRegistrar
 
         $params = $request->get_json_params();
         $payload = is_array($params) ? $params : [];
+
+        if (array_key_exists('featured_media', $payload) && ! $this->canEmbedMedia($connection, $payload['featured_media'])) {
+            return RequestContext::deny();
+        }
+
+        if (! $this->canEmbedContentMedia($connection, $payload)) {
+            return RequestContext::deny();
+        }
 
         $service = new ContentService();
         $result = $service->update($id, $payload, $canPublish);
@@ -540,6 +698,219 @@ final class RestRegistrar
         );
 
         return new WP_REST_Response(['deleted' => true, 'id' => $id, 'force' => $force]);
+    }
+
+    public function listPlugins(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'plugins.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new PluginService())->list();
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'plugin',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function managePlugin(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $action = (string) $request->get_param('action');
+        $scope = match ($action) {
+            'install' => 'plugins.install',
+            'activate' => 'plugins.activate',
+            'deactivate' => 'plugins.deactivate',
+            'update' => 'plugins.update',
+            'delete' => 'plugins.delete',
+            default => null,
+        };
+
+        if ($scope === null || ! ScopeChecker::userCan($connection, $scope)) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $service = new PluginService();
+
+        $result = match ($action) {
+            'install' => $service->install((string) ($payload['slug'] ?? '')),
+            'activate' => $service->activate((string) ($payload['plugin'] ?? '')),
+            'deactivate' => $service->deactivate((string) ($payload['plugin'] ?? '')),
+            'update' => $service->update((string) ($payload['plugin'] ?? '')),
+            'delete' => $service->delete((string) ($payload['plugin'] ?? '')),
+            default => ['error' => ErrorCodes::INVALID_ARGUMENT],
+        };
+        $audit = new AuditLogger();
+
+        if (($result['error'] ?? null) !== null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                $action,
+                'plugin',
+                isset($payload['plugin']) ? (string) $payload['plugin'] : null,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 403;
+            $err = ErrorCodes::error($result['error'], 'Failed to manage plugin.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $resourceId = isset($result['plugin']['plugin'])
+            ? (string) $result['plugin']['plugin']
+            : (isset($payload['plugin']) ? (string) $payload['plugin'] : (string) ($payload['slug'] ?? ''));
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            $action,
+            'plugin',
+            $resourceId,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result['plugin'] ?? ['deleted' => true]);
+    }
+
+    public function listThemes(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'themes.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new ThemeService())->list();
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'theme',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function manageTheme(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $action = (string) $request->get_param('action');
+        $scope = match ($action) {
+            'install' => 'themes.install',
+            'activate' => 'themes.activate',
+            'update' => 'themes.update',
+            'delete' => 'themes.delete',
+            default => null,
+        };
+
+        if ($scope === null || ! ScopeChecker::userCan($connection, $scope)) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $service = new ThemeService();
+        $result = match ($action) {
+            'install' => $service->install((string) ($payload['slug'] ?? '')),
+            'activate' => $service->activate((string) ($payload['stylesheet'] ?? '')),
+            'update' => $service->update((string) ($payload['stylesheet'] ?? '')),
+            'delete' => $service->delete((string) ($payload['stylesheet'] ?? '')),
+            default => ['error' => ErrorCodes::INVALID_ARGUMENT],
+        };
+
+        if (($result['error'] ?? null) !== null) {
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 403;
+            $err = ErrorCodes::error($result['error'], 'Failed to manage theme.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $resourceId = (string) ($result['theme']['stylesheet'] ?? $payload['stylesheet'] ?? $payload['slug'] ?? '');
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            $action,
+            'theme',
+            $resourceId,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result['theme'] ?? ['deleted' => true]);
+    }
+
+    public function listUsers(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'users.read')) {
+            return RequestContext::deny();
+        }
+
+        return new WP_REST_Response((new UserService())->list($request->get_params()));
+    }
+
+    public function createUser(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->respondToUserMutation($request, 'users.create', 'create');
+    }
+
+    public function updateUser(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->respondToUserMutation($request, 'users.update', 'update');
+    }
+
+    public function deleteUser(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->respondToUserMutation($request, 'users.delete', 'delete');
     }
 
     public function listComments(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -822,6 +1193,280 @@ final class RestRegistrar
         return new WP_REST_Response($item);
     }
 
+    public function updateMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+        if (! ScopeChecker::userCan($connection, 'media.update') || ! user_can($connection->userId, 'edit_post', $id)) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $result = (new MediaService())->update($id, is_array($params) ? $params : []);
+
+        if ($result['error'] !== null) {
+            $this->auditMedia($connection, 'update', $id, false, $result['error'], $startedAt);
+            $status = $result['error'] === ErrorCodes::MEDIA_NOT_FOUND ? 404 : 400;
+            $err = ErrorCodes::error($result['error'], 'Failed to update media.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $this->auditMedia($connection, 'update', $id, true, null, $startedAt);
+
+        return new WP_REST_Response($result['media']);
+    }
+
+    public function deleteMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $id = (int) $request->get_param('id');
+        if (! ScopeChecker::userCan($connection, 'media.delete') || ! user_can($connection->userId, 'delete_post', $id)) {
+            return RequestContext::deny();
+        }
+
+        $result = (new MediaService())->delete($id);
+
+        if ($result['error'] !== null) {
+            $this->auditMedia($connection, 'delete', $id, false, $result['error'], $startedAt);
+            $status = $result['error'] === ErrorCodes::MEDIA_NOT_FOUND ? 404 : 403;
+            $err = ErrorCodes::error($result['error'], 'Failed to delete media.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $this->auditMedia($connection, 'delete', $id, true, null, $startedAt);
+
+        return new WP_REST_Response(['deleted' => true, 'id' => $id]);
+    }
+
+    public function getSettings(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'settings.read')) {
+            return RequestContext::deny();
+        }
+
+        $settings = (new SettingsService())->get();
+        $this->auditSettings($connection, 'read', true, null, $startedAt);
+
+        return new WP_REST_Response($settings);
+    }
+
+    public function updateSettings(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, 'settings.update')) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $result = (new SettingsService())->update(is_array($params) ? $params : []);
+
+        if ($result['error'] !== null) {
+            $this->auditSettings($connection, 'update', false, $result['error'], $startedAt);
+            $err = ErrorCodes::error($result['error'], 'Failed to update site settings.', 400);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $this->auditSettings($connection, 'update', true, null, $startedAt);
+
+        return new WP_REST_Response($result['settings']);
+    }
+
+    public function listMenus(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->menuResponse($request, 'read');
+    }
+
+    public function getMenu(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($denied = $this->requireScope($request, 'appearance.read')) instanceof WP_Error) {
+            return $denied;
+        }
+        $result = (new NavigationService())->get((int) $request->get_param('id'));
+        return $result['error'] === null ? new WP_REST_Response($result['menu']) : RequestContext::invalid('Menu not found.');
+    }
+
+    public function createMenu(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->menuResponse($request, 'create');
+    }
+    public function updateMenu(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->menuResponse($request, 'update');
+    }
+    public function deleteMenu(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        return $this->menuResponse($request, 'delete');
+    }
+
+    public function setMenuLocations(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($denied = $this->requireScope($request, 'appearance.update')) instanceof WP_Error) {
+            return $denied;
+        }
+        $params = $request->get_json_params();
+        $locations = is_array($params['locations'] ?? null) ? $params['locations'] : [];
+        (new NavigationService())->setLocations(array_map('intval', $locations));
+        /** @phpstan-ignore-next-line WordPress core navigation function is loaded at runtime. */
+        return new WP_REST_Response(['locations' => wp_get_nav_menu_locations()]);
+    }
+
+    public function saveMenuItem(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($d = $this->requireScope($request, 'appearance.update')) instanceof WP_Error) {
+            return $d;
+        }
+        $payload = $request->get_json_params();
+        $result = (new NavigationService())->saveItem(
+            (int) $request->get_param('menu_id'),
+            $request->get_param('id') ? (int) $request->get_param('id') : null,
+            is_array($payload) ? $payload : [],
+        );
+        return $result['error'] === null ? new WP_REST_Response($result['item']) : RequestContext::invalid('Invalid navigation menu item.');
+    }
+
+    public function deleteMenuItem(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($d = $this->requireScope($request, 'appearance.update')) instanceof WP_Error) {
+            return $d;
+        }
+        return new WP_REST_Response((new NavigationService())->deleteItem((int) $request->get_param('id')));
+    }
+
+    public function siteHealth(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($denied = $this->requireScope($request, 'site.health.read')) instanceof WP_Error) {
+            return $denied;
+        }
+        return new WP_REST_Response((new SiteOperationsService())->health());
+    }
+
+    public function updates(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($denied = $this->requireScope($request, 'updates.read')) instanceof WP_Error) {
+            return $denied;
+        }
+        return new WP_REST_Response((new SiteOperationsService())->updates());
+    }
+
+    public function maintenance(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($denied = $this->requireScope($request, 'site.maintenance')) instanceof WP_Error) {
+            return $denied;
+        }
+        $params = $request->get_json_params();
+        return new WP_REST_Response((new SiteOperationsService())->maintenance((bool) ($params['enabled'] ?? false)));
+    }
+
+    public function updateCore(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($denied = $this->requireScope($request, 'core.update')) instanceof WP_Error) {
+            return $denied;
+        }
+        $result = (new SiteOperationsService())->updateCore();
+        return $result['error'] === null
+            ? new WP_REST_Response($result)
+            : RequestContext::invalid('No eligible WordPress core update is available.');
+    }
+
+    public function listRevisions(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $post = get_post((int) $request->get_param('id'));
+        if (! $post instanceof \WP_Post) {
+            return RequestContext::invalid('Content not found.');
+        }
+        $scope = $post->post_type === ContentTypes::PAGE ? 'pages.revisions.read' : 'posts.revisions.read';
+        if (($denied = $this->requireScope($request, $scope)) instanceof WP_Error) {
+            return $denied;
+        }
+        $result = (new RevisionService())->list((int) $post->ID);
+        return new WP_REST_Response(['items' => $result['items']]);
+    }
+    public function getRevision(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $result = (new RevisionService())->get((int) $request->get_param('id'));
+        if ($result['error'] !== null) {
+            return RequestContext::invalid('Revision not found.');
+        }
+        $parent = get_post((int) $result['revision']['parent_id']);
+        $scope = $parent?->post_type === ContentTypes::PAGE ? 'pages.revisions.read' : 'posts.revisions.read';
+        if (($denied = $this->requireScope($request, $scope)) instanceof WP_Error) {
+            return $denied;
+        } return new WP_REST_Response($result['revision']);
+    }
+    public function restoreRevision(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $revision = (new RevisionService())->get((int) $request->get_param('id'));
+        if ($revision['error'] !== null) {
+            return RequestContext::invalid('Revision not found.');
+        }
+        $parent = get_post((int) $revision['revision']['parent_id']);
+        $scope = $parent?->post_type === ContentTypes::PAGE ? 'pages.revisions.restore' : 'posts.revisions.restore';
+        $connection = $this->requireScope($request, $scope);
+        if ($connection instanceof WP_Error || ! $parent instanceof \WP_Post || ! user_can($connection->userId, 'edit_post', $parent->ID)) {
+            return $connection instanceof WP_Error ? $connection : RequestContext::deny();
+        }
+        return new WP_REST_Response((new RevisionService())->restore((int) $request->get_param('id')));
+    }
+    public function listRedirects(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($d = $this->requireScope($request, 'redirects.read')) instanceof WP_Error) {
+            return $d;
+        } return new WP_REST_Response((new RedirectService())->list());
+    }
+    public function notFoundLog(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($d = $this->requireScope($request, 'redirects.read')) instanceof WP_Error) {
+            return $d;
+        } return new WP_REST_Response((new RedirectService())->notFound());
+    }
+    public function upsertRedirect(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($d = $this->requireScope($request, 'redirects.update')) instanceof WP_Error) {
+            return $d;
+        }
+        $p = $request->get_json_params();
+        $r = (new RedirectService())->upsert(
+            (string) ($p['source'] ?? ''),
+            (string) ($p['destination'] ?? ''),
+            (int) ($p['status'] ?? 301),
+        );
+        return $r['error'] === null ? new WP_REST_Response($r['redirect']) : RequestContext::invalid('Invalid redirect.');
+    }
+    public function deleteRedirect(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        if (($d = $this->requireScope($request, 'redirects.update')) instanceof WP_Error) {
+            return $d;
+        } return new WP_REST_Response((new RedirectService())->delete('/' . ltrim((string) $request->get_param('source'), '/')));
+    }
+
     public function mcpStats(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
         $startedAt = microtime(true);
@@ -918,7 +1563,7 @@ final class RestRegistrar
             return $connection;
         }
 
-        if (! ScopeChecker::userCan($connection, 'site.manage')) {
+        if (! ScopeChecker::userCan($connection, 'seo.robots.update')) {
             return RequestContext::deny();
         }
 
@@ -1156,6 +1801,65 @@ final class RestRegistrar
         return ScopeChecker::canUpdateContent($connection, $type) && ScopeChecker::userCan($connection, $scope);
     }
 
+    private function respondToUserMutation(WP_REST_Request $request, string $scope, string $action): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::userCan($connection, $scope)) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $payload = array_merge($request->get_params(), is_array($params) ? $params : []);
+        $id = (int) $request->get_param('id');
+
+        if (
+            ($action === 'create' || $action === 'update')
+            && array_key_exists('role', $payload)
+            && ! ScopeChecker::userCan($connection, 'users.assign_roles')
+        ) {
+            return RequestContext::deny();
+        }
+
+        if ($action !== 'create' && ! user_can($connection->userId, $action === 'delete' ? 'delete_user' : 'edit_user', $id)) {
+            return RequestContext::deny();
+        }
+
+        $service = new UserService();
+        $result = match ($action) {
+            'create' => $service->create($payload),
+            'update' => $service->update($id, $payload),
+            'delete' => $service->delete($id, isset($payload['reassign']) ? (int) $payload['reassign'] : null),
+            default => ['error' => ErrorCodes::INVALID_ARGUMENT],
+        };
+
+        if (($result['error'] ?? null) !== null) {
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 403;
+            $err = ErrorCodes::error($result['error'], 'Failed to manage user.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $resourceId = (string) ($result['user']['id'] ?? $id);
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            $action,
+            'user',
+            $resourceId,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result['user'] ?? ['deleted' => true]);
+    }
+
     private function seoWriteDenied(int $postId): WP_Error
     {
         $post = get_post($postId);
@@ -1167,6 +1871,104 @@ final class RestRegistrar
         }
 
         return RequestContext::deny();
+    }
+
+    private function canEmbedMedia(Connection $connection, mixed $mediaId): bool
+    {
+        $id = (int) $mediaId;
+
+        // A zero ID clears a featured image and does not grant access to another attachment.
+        if ($id === 0) {
+            return true;
+        }
+
+        return $id > 0
+            && ScopeChecker::userCan($connection, 'media.embed')
+            && get_post_type($id) === 'attachment'
+            && user_can($connection->userId, 'edit_post', $id);
+    }
+
+    private function requireScope(WP_REST_Request $request, string $scope): Connection|WP_Error
+    {
+        $connection = $this->connection($request);
+        return $connection instanceof WP_Error || ! ScopeChecker::userCan($connection, $scope) ? RequestContext::deny() : $connection;
+    }
+
+    private function menuResponse(WP_REST_Request $request, string $action): WP_REST_Response|WP_Error
+    {
+        $scope = $action === 'read' ? 'appearance.read' : 'appearance.update';
+        if (($denied = $this->requireScope($request, $scope)) instanceof WP_Error) {
+            return $denied;
+        }
+        $service = new NavigationService();
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $id = (int) $request->get_param('id');
+        $result = match ($action) {
+            'read' => ['menu' => $service->list(), 'error' => null],
+            'create' => $service->create((string) ($payload['name'] ?? '')),
+            'update' => $service->update($id, (string) ($payload['name'] ?? '')),
+            'delete' => $service->delete($id),
+            default => ['error' => ErrorCodes::INVALID_ARGUMENT],
+        };
+        if (($result['error'] ?? null) !== null) {
+            return RequestContext::invalid('Unable to manage navigation menu.');
+        }
+        return new WP_REST_Response($result['menu'] ?? ['deleted' => true]);
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function canEmbedContentMedia(Connection $connection, array $payload): bool
+    {
+        if (! isset($payload['content']) || ! is_string($payload['content'])) {
+            return true;
+        }
+
+        $matches = [];
+        preg_match_all('/(?:wp-image-|data-id=["\']|"id"\s*:\s*|ids=["\'])(\d+(?:\s*,\s*\d+)*)/', $payload['content'], $matches);
+
+        $ids = [];
+        foreach ($matches[1] as $match) {
+            foreach (preg_split('/\s*,\s*/', $match) ?: [] as $id) {
+                $ids[(int) $id] = true;
+            }
+        }
+
+        foreach (array_keys($ids) as $id) {
+            if (! $this->canEmbedMedia($connection, $id)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function auditMedia(Connection $connection, string $action, int $id, bool $success, ?string $error, float $startedAt): void
+    {
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            $action,
+            'media',
+            (string) $id,
+            $success,
+            $error === null ? null : ['error' => $error],
+            $this->durationMs($startedAt),
+        );
+    }
+
+    private function auditSettings(Connection $connection, string $action, bool $success, ?string $error, float $startedAt): void
+    {
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            $action,
+            'settings',
+            null,
+            $success,
+            $error === null ? null : ['error' => $error],
+            $this->durationMs($startedAt),
+        );
     }
 
     private function durationMs(float $startedAt): int
