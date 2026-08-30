@@ -1,6 +1,8 @@
 .env
 .env.prod
 .local/
+.idea/
+.vscode/
 node_modules/
 vendor/
 build/

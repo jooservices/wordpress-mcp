@@ -6,6 +6,15 @@ namespace JOOservices\WordPressMcp\Database;
 
 final class Schema
 {
+    /**
+     * Bump this when the SQL below changes. `dbDelta()` is additive-safe, so
+     * re-running `install()` on a version change is the plugin's general
+     * migration mechanism — see `maybeUpgrade()`.
+     */
+    private const VERSION = 2;
+
+    private const VERSION_OPTION = 'jooservices_mcp_schema_version';
+
     public static function install(): void
     {
         global $wpdb;
@@ -38,15 +47,31 @@ CREATE TABLE {$audit} (
     resource_id VARCHAR(64) NULL,
     success TINYINT(1) NOT NULL,
     metadata LONGTEXT NULL,
+    duration_ms INT UNSIGNED NULL,
     created_at DATETIME NOT NULL,
     PRIMARY KEY (id),
     KEY connection_id (connection_id),
-    KEY created_at (created_at)
+    KEY created_at (created_at),
+    KEY action (action)
 ) {$charset};
 SQL;
 
         require_once ABSPATH . 'wp-admin/includes/upgrade.php';
         dbDelta($sql);
+
+        update_option(self::VERSION_OPTION, self::VERSION);
+    }
+
+    /**
+     * Re-runs `install()` when the stored schema version is behind. Hook
+     * this to `plugins_loaded`/`admin_init` in addition to the activation
+     * hook, so upgrades apply on plugin update, not just fresh installs.
+     */
+    public static function maybeUpgrade(): void
+    {
+        if ((int) get_option(self::VERSION_OPTION, 0) < self::VERSION) {
+            self::install();
+        }
     }
 
     public static function connectionsTable(): string

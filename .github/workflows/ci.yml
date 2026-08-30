@@ -21,4 +21,4 @@ jobs:
       - name: MCP CI
         working-directory: packages/mcp-server
         run: |
-          docker run --rm -v "$PWD:/app" -w /app node:22-bookworm-slim sh -c "npm install && npm run ci"
+          docker run --rm -v "$PWD:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm run ci"

@@ -28,7 +28,7 @@ graph LR
 | `make ci` | Full quality gate |
 | `make test` | Unit tests only |
 | `make integration` | Live stack integration (requires `make up`) |
-| `make plugin-release` | Build `build/wordpress-chatgpt-1.1.0.zip` |
+| `make plugin-release` | Build `build/wordpress-chatgpt-<version>.zip` (version read from the plugin header) |
 
 ## Release (v1.0.0+)
 

@@ -7,7 +7,7 @@ if (! defined('ABSPATH')) {
 }
 ?>
 <div class="wrap">
-    <h1>JOOservices ChatGPT Connector</h1>
+    <h1>JOOservices WordPress - MCP</h1>
 
     <?php if (! empty($newToken)) : ?>
         <div class="notice notice-success">

@@ -2,8 +2,8 @@
 
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
-[![Node](https://img.shields.io/badge/Node-22%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
+[![Release](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
@@ -12,12 +12,12 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.1.0
+## About v1.2.0
 
 | | |
 | --- | --- |
-| Status | **v1.1.0 — OAuth persistence + scope hardening** |
-| Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 22) |
+| Status | **v1.2.0 — safety gates, resources, preview diffs, semantic search, session site, tool allowlist, request observability, on-site SEO tools** |
+| Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
 | Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
 
@@ -27,15 +27,27 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 
 - Scoped REST API under `/wp-json/chatgpt-connector/v1/`
 - Connection management in wp-admin (hashed tokens, one-time reveal)
-- Rate limiting and audit log for mutating operations
+- Rate limiting and a full request audit log (reads, writes, and denials), with retention and CSV export
 - Default create = draft; publish gated by scope
+- Upload hardening: content sniffing + executable-extension blocklist
 
 **MCP server**
 
 - One MCP server → one or many WordPress sites (`WORDPRESS_SITES`)
-- 14 purpose-built tools (site registry, content, comments, terms, media)
+- 25 purpose-built tools (site registry, content, comments, terms, media, SEO, request observability)
+- WordPress entities browsable as MCP resources (`wordpress://sites|content|comments|media|terms`)
+- Safety gates: publish transitions, deletion, robots.txt updates, and SEO metadata writes require `confirm: true`; preview diffs with `wordpress_preview_content_update`
+- Semantic search: filter by author name, category/tag slug, and custom field
+- Session-aware workflows: `wordpress_set_active_site` sets a per-session default site
+- On-site SEO tools: robots.txt, per-post audit (title/description/noindex/headings/alt text/internal links), and metadata fixes — auto-detects Yoast/Rank Math, no external API calls
+- Request observability: `X-Request-Id` correlation with the WordPress audit log, `wordpress_get_mcp_stats` / `wordpress_get_mcp_request_log` tools, log retention
+- `wordpress_get_site_limits` reports the site's real PHP upload/content limits
 - Streamable HTTP transport at `/mcp`
 - OAuth 2.1 Mixed auth (default) or static bearer for dev
+- Protocol DTO whitelists (no internal field leakage to MCP clients)
+- MCP protocol version negotiation (2025-11-25 → 2024-10-07)
+- Per-tool policy: access levels, `MCP_DISABLED_TOOLS`, `MCP_ENABLED_TOOLS` allowlist
+- Event observability (JSON) + session cap/idle eviction
 
 ## Requirements
 
@@ -85,19 +97,44 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | Tool | Access |
 |------|--------|
 | `wordpress_list_sites` | Read |
+| `wordpress_set_active_site` | Read (session default for `site`) |
 | `wordpress_get_site` | Read |
 | `wordpress_search_content` | Read |
 | `wordpress_get_content` | Read |
 | `wordpress_create_content` | Write (draft default) |
-| `wordpress_update_content` | Write |
-| `wordpress_delete_content` | Write (trash by default; `force` for permanent) |
+| `wordpress_update_content` | Write (`confirm: true` required to publish) |
+| `wordpress_preview_content_update` | Read (diff preview before update) |
+| `wordpress_delete_content` | Write (trash by default; `force` for permanent; `confirm: true` required) |
 | `wordpress_list_comments` | Read |
 | `wordpress_get_comment` | Read |
 | `wordpress_moderate_comment` | Write |
 | `wordpress_list_terms` | Read |
 | `wordpress_list_media` | Read |
 | `wordpress_get_media` | Read |
-| `wordpress_upload_media` | Write (base64, max 10 MB file; MCP accepts up to 15 MB JSON body) |
+| `wordpress_upload_media` | Write (base64; check `wordpress_get_site_limits` for the real ceiling) |
+| `wordpress_get_site_limits` | Read (PHP upload/content limits) |
+| `wordpress_get_mcp_stats` | Read (request counts, success/error, latency) |
+| `wordpress_get_mcp_request_log` | Read (paginated audit log) |
+| `wordpress_get_robots` | Read |
+| `wordpress_update_robots` | Write (`confirm: true` required) |
+| `wordpress_seo_audit` | Read (title/description/noindex/headings/alt text/internal links) |
+| `wordpress_get_seo_metadata` | Read |
+| `wordpress_update_seo_metadata` | Write (`confirm: true` required) |
+| `wordpress_seo_fix` | Write (`confirm: true` required) |
+
+## MCP resources
+
+Clients can browse WordPress entities without calling tools:
+
+| URI template | Contents |
+|--------------|----------|
+| `wordpress://sites/{siteId}` | Site info |
+| `wordpress://content/{siteId}/{id}` | Post or page |
+| `wordpress://comments/{siteId}/{id}` | Comment |
+| `wordpress://media/{siteId}/{id}` | Media item |
+| `wordpress://terms/{siteId}/{taxonomy}` | Categories or tags |
+
+Resources share the DTO whitelists and per-tool policy: disabling `wordpress_get_content` (or omitting it from `MCP_ENABLED_TOOLS`) also blocks the `wordpress://content/...` resource.
 
 ## Development
 
@@ -132,7 +169,7 @@ See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 | [WORDPRESS-SETUP.md](docs/WORDPRESS-SETUP.md) | Plugin install |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | MCP server deploy |
 | [CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md) | ChatGPT connector |
-| [OAUTH-VI.md](docs/OAUTH-VI.md) | OAuth giải thích (tiếng Việt) |
+| [OAUTH-EXPLAINED.md](docs/OAUTH-EXPLAINED.md) | OAuth vs. WordPress connection scopes explained |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [SECURITY.md](SECURITY.md) | Security model |
 

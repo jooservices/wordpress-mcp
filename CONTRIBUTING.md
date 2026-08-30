@@ -5,7 +5,7 @@ Thank you for considering a contribution to `jooservices/wordpress-mcp`.
 ## Requirements
 
 - Docker with Docker Compose — **all** tooling runs in containers
-- Familiarity with WordPress plugin development (PHP 8.3) and TypeScript (Node 22)
+- Familiarity with WordPress plugin development (PHP 8.3) and TypeScript (Node 24)
 
 ## Setup
 
