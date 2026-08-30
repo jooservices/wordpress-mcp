@@ -55,5 +55,5 @@ WordPress is **not** bundled in production — deploy the plugin on each custome
 
 - MariaDB 11.4.13
 - WordPress PHP 8.3
-- MCP Node 22
+- MCP Node 24
 - PHP 8.3 CLI for plugin CI
