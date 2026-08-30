@@ -3,7 +3,7 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-22%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
@@ -12,11 +12,11 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.0.0
+## About v1.1.0
 
 | | |
 | --- | --- |
-| Status | **v1.0.0 — first public release** |
+| Status | **v1.1.0 — OAuth persistence + scope hardening** |
 | Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 22) |
 | Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
