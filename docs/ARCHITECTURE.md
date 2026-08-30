@@ -38,9 +38,9 @@ Connection tokens live on the MCP server only — never exposed to ChatGPT.
 
 Search and list operations return **summary DTOs**. Full content is fetched only via `wordpress_get_content`.
 
-Mutations are logged in the plugin audit table. Rate limiting uses WordPress transients per connection.
+Every request (reads, writes, and denials) is logged in the plugin audit table, correlated with the MCP server's event log via `X-Request-Id`. Rate limiting uses WordPress transients per connection.
 
-Media uploads travel as base64 JSON through MCP (15 MB request body limit on the MCP server; 10 MB decoded file limit on the plugin).
+Media uploads travel as base64 JSON through MCP. MCP's own body-size limit (`MCP_JSON_BODY_LIMIT`, default 100 MB) is a backstop only — WordPress's real PHP limits (`upload_max_filesize`, `post_max_size`) are authoritative; check them via `wordpress_get_site_limits`.
 
 ## Docker stacks
 

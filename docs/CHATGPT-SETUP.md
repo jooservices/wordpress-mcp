@@ -54,7 +54,7 @@ make prod-tunnel
 
 On first write action (create/update/delete/moderate/upload), ChatGPT prompts you to link the app via OAuth.
 
-> **Tiếng Việt:** Xem [OAUTH-VI.md](OAUTH-VI.md) để hiểu OAuth và scope WordPress khác nhau như thế nào.
+> See [OAUTH-EXPLAINED.md](OAUTH-EXPLAINED.md) for how MCP OAuth scopes and WordPress connection scopes differ.
 
 ## OAuth scopes
 
