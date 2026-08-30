@@ -14,6 +14,7 @@ const current: ContentDto = {
   author: { id: 1, name: "Admin" },
   categories: [{ id: 3, name: "News", slug: "news" }],
   tags: [{ id: 9, name: "Featured", slug: "featured" }],
+  featured_media: 17,
 };
 
 describe("computeContentChanges", () => {
@@ -33,9 +34,10 @@ describe("computeContentChanges", () => {
   });
 
   it("detects scalar field changes", () => {
-    expect(computeContentChanges(current, { title: "New title", status: "publish" })).toEqual([
+    expect(computeContentChanges(current, { title: "New title", status: "publish", featured_media: 18 })).toEqual([
       { field: "title", from: "Old title", to: "New title" },
       { field: "status", from: "draft", to: "publish" },
+      { field: "featured_media", from: 17, to: 18 },
     ]);
   });
 

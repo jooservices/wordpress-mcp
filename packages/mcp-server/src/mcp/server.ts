@@ -16,12 +16,16 @@ import {
   type DtoKind,
   type MediaDto,
   type PaginatedDto,
+  type PluginDto,
   type RobotsDto,
   type SeoAuditDto,
   type SeoMetadataDto,
+  type SettingsDto,
   type SiteDto,
   type SiteLimitsDto,
   type TermDto,
+  type ThemeDto,
+  type UserDto,
 } from "./dto.js";
 import type { ObservabilityTags } from "./observability.js";
 import { registerWordPressResources } from "./resources.js";
@@ -200,7 +204,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   const server = new McpServer(
     {
       name: "wordpress-mcp",
-      version: "1.2.1",
+      version: "1.3.0",
     },
     {
       instructions: serverInstructions(registry),
@@ -301,6 +305,295 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
         content: [{ type: "text", text: JSON.stringify(limits, null, 2) }],
         structuredContent: withSiteMeta(siteId, limits),
       };
+    },
+  );
+
+  const listPluginsSchema = z.object({ site: siteSchema });
+  type ListPluginsArgs = z.infer<typeof listPluginsSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_list_plugins",
+      title: "List WordPress plugins",
+      description: "List installed plugins, whether each is active, and whether WordPress reports an update available. Requires plugins.read.",
+      inputSchema: listPluginsSchema,
+      access: "read",
+      dto: { kind: "plugin", list: true },
+    },
+    async ({ client, siteId, args }: ToolContext<ListPluginsArgs>) => {
+      const result = await client.get<PaginatedDto<PluginDto>>("/plugins", wpArgs(args));
+      return {
+        content: [{ type: "text", text: `Found ${result.items.length} plugin(s) on site "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
+
+  const installPluginSchema = z.object({
+    site: siteSchema,
+    slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).describe("WordPress.org plugin slug; URLs and ZIP files are not accepted."),
+    confirm: z.boolean().optional().default(false).describe("Required before downloading and installing plugin code."),
+  });
+  type InstallPluginArgs = z.infer<typeof installPluginSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_install_plugin",
+      title: "Install a WordPress.org plugin",
+      description: "Download and install a plugin from the official WordPress.org directory by slug. Requires plugins.install and confirm: true.",
+      inputSchema: installPluginSchema,
+      access: "write",
+      dto: { kind: "plugin" },
+    },
+    async ({ client, siteId, args }: ToolContext<InstallPluginArgs>) => {
+      if (!args.confirm) {
+        return confirmationRequired(
+          `Installing WordPress.org plugin "${args.slug}" on site "${siteId}" downloads and writes executable code. Re-run with confirm: true to proceed.`,
+          withSiteMeta(siteId, { action: "install", slug: args.slug }),
+        );
+      }
+
+      const { confirm: _confirm, ...payload } = wpArgs(args);
+      const plugin = await client.post<PluginDto>("/plugins/install", payload);
+      return {
+        content: [{ type: "text", text: `Installed plugin "${plugin.name}" on site "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, plugin),
+      };
+    },
+  );
+
+  const managePluginSchema = z.object({
+    site: siteSchema,
+    plugin: z.string().min(1).describe("Installed plugin file, for example akismet/akismet.php."),
+    confirm: z.boolean().optional().default(false).describe("Required before changing installed plugin code or activation state."),
+  });
+  type ManagePluginArgs = z.infer<typeof managePluginSchema>;
+
+  const pluginActions = [
+    ["activate", "wordpress_activate_plugin", "Activate"],
+    ["deactivate", "wordpress_deactivate_plugin", "Deactivate"],
+    ["update", "wordpress_update_plugin", "Update"],
+    ["delete", "wordpress_delete_plugin", "Delete"],
+  ] as const;
+
+  for (const [action, name, title] of pluginActions) {
+    registerWordPressTool(
+      server,
+      registry,
+      options,
+      {
+        name,
+        title: `${title} a WordPress plugin`,
+        description: `${title} an installed WordPress plugin. Requires plugins.${action} and confirm: true.${action === "delete" ? " Deactivate the plugin first." : ""}`,
+        inputSchema: managePluginSchema,
+        access: action === "delete" ? "delete" : "write",
+        ...(action === "delete" ? {} : { dto: { kind: "plugin" as const } }),
+      },
+      async ({ client, siteId, args }: ToolContext<ManagePluginArgs>) => {
+        if (!args.confirm) {
+          return confirmationRequired(
+            `${title} plugin "${args.plugin}" on site "${siteId}" changes site code or runtime state. Re-run with confirm: true to proceed.`,
+            withSiteMeta(siteId, { action, plugin: args.plugin }),
+          );
+        }
+
+        const { confirm: _confirm, ...payload } = wpArgs(args);
+        const result = await client.post<PluginDto | { deleted: boolean }>(`/plugins/${action}`, payload);
+        const text = action === "delete"
+          ? `Deleted plugin "${args.plugin}" on site "${siteId}".`
+          : `${title}d plugin "${args.plugin}" on site "${siteId}".`;
+        return {
+          content: [{ type: "text", text }],
+          structuredContent: withSiteMeta(siteId, result),
+        };
+      },
+    );
+  }
+
+  const listThemesSchema = z.object({ site: siteSchema });
+  type ListThemesArgs = z.infer<typeof listThemesSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_list_themes",
+      title: "List WordPress themes",
+      description: "List installed themes, active theme, and available updates. Requires themes.read.",
+      inputSchema: listThemesSchema,
+      access: "read",
+      dto: { kind: "theme", list: true },
+    },
+    async ({ client, siteId, args }: ToolContext<ListThemesArgs>) => {
+      const result = await client.get<PaginatedDto<ThemeDto>>("/themes", wpArgs(args));
+      return {
+        content: [{ type: "text", text: `Found ${result.items.length} theme(s) on site "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
+
+  const installThemeSchema = z.object({
+    site: siteSchema,
+    slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).describe("WordPress.org theme slug; URLs and ZIP files are not accepted."),
+    confirm: z.boolean().optional().default(false).describe("Required before downloading and installing theme code."),
+  });
+  type InstallThemeArgs = z.infer<typeof installThemeSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_install_theme",
+      title: "Install a WordPress.org theme",
+      description: "Download and install a theme from the official WordPress.org directory by slug. Requires themes.install and confirm: true.",
+      inputSchema: installThemeSchema,
+      access: "write",
+      dto: { kind: "theme" },
+    },
+    async ({ client, siteId, args }: ToolContext<InstallThemeArgs>) => {
+      if (!args.confirm) {
+        return confirmationRequired(
+          `Installing WordPress.org theme "${args.slug}" on site "${siteId}" downloads and writes executable code. Re-run with confirm: true to proceed.`,
+          withSiteMeta(siteId, { action: "install", slug: args.slug }),
+        );
+      }
+
+      const { confirm: _confirm, ...payload } = wpArgs(args);
+      const theme = await client.post<ThemeDto>("/themes/install", payload);
+      return {
+        content: [{ type: "text", text: `Installed theme "${theme.name}" on site "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, theme),
+      };
+    },
+  );
+
+  const manageThemeSchema = z.object({
+    site: siteSchema,
+    stylesheet: z.string().min(1).describe("Installed theme stylesheet, for example twentytwentyfive."),
+    confirm: z.boolean().optional().default(false).describe("Required before changing installed theme code or the active theme."),
+  });
+  type ManageThemeArgs = z.infer<typeof manageThemeSchema>;
+
+  const themeActions = [
+    ["activate", "wordpress_activate_theme", "Activate"],
+    ["update", "wordpress_update_theme", "Update"],
+    ["delete", "wordpress_delete_theme", "Delete"],
+  ] as const;
+
+  for (const [action, name, title] of themeActions) {
+    registerWordPressTool(
+      server,
+      registry,
+      options,
+      {
+        name,
+        title: `${title} a WordPress theme`,
+        description: `${title} an installed WordPress theme. Requires the matching themes.* scope and confirm: true.${action === "delete" ? " The active theme cannot be deleted." : ""}`,
+        inputSchema: manageThemeSchema,
+        access: action === "delete" ? "delete" : "write",
+        ...(action === "delete" ? {} : { dto: { kind: "theme" as const } }),
+      },
+      async ({ client, siteId, args }: ToolContext<ManageThemeArgs>) => {
+        if (!args.confirm) {
+          return confirmationRequired(
+            `${title} theme "${args.stylesheet}" on site "${siteId}" changes site code or presentation. Re-run with confirm: true to proceed.`,
+            withSiteMeta(siteId, { action, stylesheet: args.stylesheet }),
+          );
+        }
+
+        const { confirm: _confirm, ...payload } = wpArgs(args);
+        const result = await client.post<ThemeDto | { deleted: boolean }>(`/themes/${action}`, payload);
+        return {
+          content: [{ type: "text", text: action === "delete" ? `Deleted theme "${args.stylesheet}" on site "${siteId}".` : `${title}d theme "${args.stylesheet}" on site "${siteId}".` }],
+          structuredContent: withSiteMeta(siteId, result),
+        };
+      },
+    );
+  }
+
+  const listUsersSchema = z.object({ site: siteSchema, q: z.string().optional(), page: z.number().int().min(1).optional(), per_page: z.number().int().min(1).max(50).optional() });
+  type ListUsersArgs = z.infer<typeof listUsersSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    { name: "wordpress_list_users", title: "List WordPress users", description: "List WordPress users. Requires users.read.", inputSchema: listUsersSchema, access: "read", dto: { kind: "user", list: true } },
+    async ({ client, siteId, args }: ToolContext<ListUsersArgs>) => {
+      const result = await client.get<PaginatedDto<UserDto>>("/users", wpArgs(args));
+      return { content: [{ type: "text", text: `Found ${result.items.length} user(s) on site "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
+    },
+  );
+
+  const createUserSchema = z.object({
+    site: siteSchema,
+    login: z.string().min(1),
+    email: z.string().email(),
+    password: z.string().min(12).describe("Initial password. It is never returned or logged."),
+    display_name: z.string().optional(),
+    role: z.string().optional(),
+    confirm: z.boolean().optional().default(false).describe("Required before creating an account."),
+  });
+  type CreateUserArgs = z.infer<typeof createUserSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    { name: "wordpress_create_user", title: "Create a WordPress user", description: "Create a WordPress user account. Requires users.create and confirm: true.", inputSchema: createUserSchema, access: "write", dto: { kind: "user" } },
+    async ({ client, siteId, args }: ToolContext<CreateUserArgs>) => {
+      if (!args.confirm) {
+        return confirmationRequired(`Creating user "${args.login}" on site "${siteId}" grants a new account. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { action: "create", login: args.login, email: args.email, role: args.role ?? "subscriber" }));
+      }
+      const { confirm: _confirm, ...payload } = wpArgs(args);
+      const user = await client.post<UserDto>("/users", payload);
+      return { content: [{ type: "text", text: `Created user #${user.id} on site "${siteId}".` }], structuredContent: withSiteMeta(siteId, user) };
+    },
+  );
+
+  const updateUserSchema = z.object({
+    site: siteSchema,
+    id: z.number().int().positive(),
+    display_name: z.string().optional(), user_email: z.string().email().optional(), user_url: z.string().url().optional(), description: z.string().optional(), first_name: z.string().optional(), last_name: z.string().optional(), role: z.string().optional(), password: z.string().min(12).optional().describe("New password; never returned or logged."),
+    confirm: z.boolean().optional().default(false).describe("Required before changing a user account."),
+  });
+  type UpdateUserArgs = z.infer<typeof updateUserSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    { name: "wordpress_update_user", title: "Update a WordPress user", description: "Update profile or password for a WordPress user. Requires users.update and confirm: true; changing role also requires users.assign_roles.", inputSchema: updateUserSchema, access: "write", dto: { kind: "user" } },
+    async ({ client, siteId, args }: ToolContext<UpdateUserArgs>) => {
+      if (!args.confirm) return confirmationRequired(`Updating user #${args.id} on site "${siteId}" changes account access. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { action: "update", id: args.id }));
+      const { confirm: _confirm, site: _site, id, ...payload } = args;
+      const user = await client.patch<UserDto>(`/users/${id}`, payload);
+      return { content: [{ type: "text", text: `Updated user #${id} on site "${siteId}".` }], structuredContent: withSiteMeta(siteId, user) };
+    },
+  );
+
+  const deleteUserSchema = z.object({ site: siteSchema, id: z.number().int().positive(), reassign: z.number().int().positive().optional(), confirm: z.boolean().optional().default(false).describe("Required before deleting a user account.") });
+  type DeleteUserArgs = z.infer<typeof deleteUserSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    { name: "wordpress_delete_user", title: "Delete a WordPress user", description: "Delete a WordPress user and optionally reassign their content. Requires users.delete and confirm: true.", inputSchema: deleteUserSchema, access: "delete" },
+    async ({ client, siteId, args }: ToolContext<DeleteUserArgs>) => {
+      if (!args.confirm) return confirmationRequired(`Deleting user #${args.id} on site "${siteId}" is irreversible. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { action: "delete", id: args.id, reassign: args.reassign ?? null }));
+      const { confirm: _confirm, site: _site, id, ...payload } = args;
+      const result = await client.delete<{ deleted: boolean }>(`/users/${id}`, payload);
+      return { content: [{ type: "text", text: `Deleted user #${id} on site "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
     },
   );
 
@@ -442,6 +735,12 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     status: z.enum(["draft", "pending", "publish", "private"]).optional(),
     categories: z.array(z.number()).optional(),
     tags: z.array(z.string()).optional(),
+    featured_media: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("Image attachment ID for the featured image. Use 0 only when updating to remove it."),
   });
   type CreateContentArgs = z.infer<typeof createContentSchema>;
 
@@ -484,6 +783,12 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     status: z.enum(["draft", "pending", "publish", "private"]).optional(),
     categories: z.array(z.number()).optional(),
     tags: z.array(z.string()).optional(),
+    featured_media: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe("Image attachment ID for the featured image. Use 0 to remove it."),
     confirm: z
       .boolean()
       .optional()
@@ -538,6 +843,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     status: z.enum(["draft", "pending", "publish", "private"]).optional(),
     categories: z.array(z.number()).optional(),
     tags: z.array(z.string()).optional(),
+    featured_media: z.number().int().min(0).optional().describe("Image attachment ID; 0 removes the featured image."),
   });
   type PreviewContentUpdateArgs = z.infer<typeof previewContentUpdateSchema>;
 
@@ -828,6 +1134,114 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       };
     },
   );
+
+  const updateMediaSchema = z.object({
+    site: siteSchema,
+    id: z.number().int().positive(),
+    title: z.string().optional(),
+    alt_text: z.string().optional(),
+    caption: z.string().optional(),
+    description: z.string().optional(),
+    confirm: z.boolean().optional().default(false),
+  });
+  type UpdateMediaArgs = z.infer<typeof updateMediaSchema>;
+
+  registerWordPressTool(
+    server, registry, options,
+    { name: "wordpress_update_media", title: "Update WordPress media", description: "Update media title, alt text, caption, or description. Requires media.update and confirm: true.", inputSchema: updateMediaSchema, access: "write", dto: { kind: "media" } },
+    async ({ client, siteId, args }: ToolContext<UpdateMediaArgs>) => {
+      if (!args.confirm) return confirmationRequired(`Updating media #${args.id} on site "${siteId}" changes published metadata. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { id: args.id }));
+      const { confirm: _confirm, site: _site, id, ...payload } = args;
+      const item = await client.patch<MediaDto>(`/media/${id}`, payload);
+      return { content: [{ type: "text", text: `Updated media #${id} on site "${siteId}".` }], structuredContent: withSiteMeta(siteId, item) };
+    },
+  );
+
+  const deleteMediaSchema = z.object({ site: siteSchema, id: z.number().int().positive(), confirm: z.boolean().optional().default(false) });
+  type DeleteMediaArgs = z.infer<typeof deleteMediaSchema>;
+
+  registerWordPressTool(
+    server, registry, options,
+    { name: "wordpress_delete_media", title: "Delete WordPress media", description: "Permanently delete a media item. Requires media.delete and confirm: true.", inputSchema: deleteMediaSchema, access: "delete" },
+    async ({ client, siteId, args }: ToolContext<DeleteMediaArgs>) => {
+      if (!args.confirm) return confirmationRequired(`Deleting media #${args.id} on site "${siteId}" is permanent. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { id: args.id }));
+      const result = await client.delete<{ deleted: boolean; id: number }>(`/media/${args.id}`);
+      return { content: [{ type: "text", text: `Deleted media #${args.id} on site "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
+    },
+  );
+
+  const siteSettingsSchema = z.object({ site: siteSchema });
+  type SiteSettingsArgs = z.infer<typeof siteSettingsSchema>;
+
+  registerWordPressTool(
+    server, registry, options,
+    { name: "wordpress_get_site_settings", title: "Get WordPress site settings", description: "Get the curated site settings exposed by this connector. Requires settings.read.", inputSchema: siteSettingsSchema, access: "read", dto: { kind: "settings" } },
+    async ({ client, siteId }: ToolContext<SiteSettingsArgs>) => {
+      const settings = await client.get<SettingsDto>("/settings");
+      return { content: [{ type: "text", text: JSON.stringify(settings, null, 2) }], structuredContent: withSiteMeta(siteId, settings) };
+    },
+  );
+
+  const updateSiteSettingsSchema = z.object({
+    site: siteSchema, blogname: z.string().optional(), blogdescription: z.string().optional(), timezone_string: z.string().optional(), date_format: z.string().optional(), time_format: z.string().optional(), start_of_week: z.number().int().min(0).max(6).optional(), posts_per_page: z.number().int().min(1).max(100).optional(), blog_public: z.boolean().optional(), default_comment_status: z.enum(["open", "closed"]).optional(), default_ping_status: z.enum(["open", "closed"]).optional(), permalink_structure: z.string().optional(), confirm: z.boolean().optional().default(false),
+  });
+  type UpdateSiteSettingsArgs = z.infer<typeof updateSiteSettingsSchema>;
+
+  registerWordPressTool(
+    server, registry, options,
+    { name: "wordpress_update_site_settings", title: "Update WordPress site settings", description: "Update the curated site settings exposed by this connector. Requires settings.update and confirm: true.", inputSchema: updateSiteSettingsSchema, access: "write", dto: { kind: "settings" } },
+    async ({ client, siteId, args }: ToolContext<UpdateSiteSettingsArgs>) => {
+      if (!args.confirm) return confirmationRequired(`Updating site settings on "${siteId}" can change public behavior and SEO. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { changing: Object.keys(args).filter((key) => !["site", "confirm"].includes(key)) }));
+      const { confirm: _confirm, ...payload } = wpArgs(args);
+      const settings = await client.patch<SettingsDto>("/settings", payload);
+      return { content: [{ type: "text", text: `Updated site settings on "${siteId}".` }], structuredContent: withSiteMeta(siteId, settings) };
+    },
+  );
+
+  const siteOperationSchema = z.object({ site: siteSchema });
+  type SiteOperationArgs = z.infer<typeof siteOperationSchema>;
+  for (const [name, title, path] of [["wordpress_get_site_health", "Get WordPress site health", "/site/health"], ["wordpress_get_update_status", "Get WordPress update status", "/updates"], ["wordpress_list_navigation_menus", "List WordPress navigation menus", "/navigation/menus"]] as const) {
+    registerWordPressTool(server, registry, options, { name, title, description: title, inputSchema: siteOperationSchema, access: "read" }, async ({ client, siteId }: ToolContext<SiteOperationArgs>) => {
+      const result = await client.get<Record<string, unknown>>(path);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) };
+    });
+  }
+
+  const maintenanceSchema = z.object({ site: siteSchema, enabled: z.boolean(), confirm: z.boolean().optional().default(false) });
+  type MaintenanceArgs = z.infer<typeof maintenanceSchema>;
+  registerWordPressTool(server, registry, options, { name: "wordpress_set_maintenance_mode", title: "Set WordPress maintenance mode", description: "Enable or disable site-wide maintenance mode. Requires site.maintenance and confirm: true.", inputSchema: maintenanceSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<MaintenanceArgs>) => {
+    if (!args.confirm) return confirmationRequired(`Changing maintenance mode on "${siteId}" changes public site availability. Re-run with confirm: true.`, withSiteMeta(siteId, { enabled: args.enabled }));
+    const { confirm: _confirm, ...payload } = wpArgs(args); const result = await client.patch<Record<string, unknown>>("/maintenance", payload);
+    return { content: [{ type: "text", text: `Maintenance mode ${args.enabled ? "enabled" : "disabled"} on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
+  });
+
+  const coreUpdateSchema = z.object({ site: siteSchema, confirm: z.boolean().optional().default(false) });
+  type CoreUpdateArgs = z.infer<typeof coreUpdateSchema>;
+  registerWordPressTool(server, registry, options, { name: "wordpress_update_core", title: "Update WordPress core", description: "Install the currently offered WordPress core update. Requires core.update and confirm: true.", inputSchema: coreUpdateSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<CoreUpdateArgs>) => {
+    if (!args.confirm) return confirmationRequired(`Updating WordPress core on "${siteId}" can change all site behavior. Ensure a backup exists, then re-run with confirm: true.`, withSiteMeta(siteId, {}));
+    const result = await client.post<Record<string, unknown>>("/updates/core", {}); return { content: [{ type: "text", text: `Core update started on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
+  });
+
+  const contentIdSchema = z.object({ site: siteSchema, id: z.number().int().positive() });
+  type ContentIdArgs = z.infer<typeof contentIdSchema>;
+  registerWordPressTool(server, registry, options, { name: "wordpress_list_revisions", title: "List WordPress revisions", description: "List post or page revisions. Requires the matching *.revisions.read scope.", inputSchema: contentIdSchema, access: "read" }, async ({ client, siteId, args }: ToolContext<ContentIdArgs>) => {
+    const result = await client.get<Record<string, unknown>>(`/content/${args.id}/revisions`); return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) };
+  });
+  const revisionSchema = z.object({ site: siteSchema, id: z.number().int().positive(), confirm: z.boolean().optional().default(false) });
+  type RevisionArgs = z.infer<typeof revisionSchema>;
+  registerWordPressTool(server, registry, options, { name: "wordpress_restore_revision", title: "Restore WordPress revision", description: "Restore a content revision. Requires matching *.revisions.restore scope and confirm: true.", inputSchema: revisionSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<RevisionArgs>) => {
+    if (!args.confirm) return confirmationRequired(`Restoring revision #${args.id} on "${siteId}" overwrites current content. Re-run with confirm: true.`, withSiteMeta(siteId, { id: args.id })); const result = await client.post<Record<string, unknown>>(`/revisions/${args.id}/restore`, {}); return { content: [{ type: "text", text: `Restored revision #${args.id}.` }], structuredContent: withSiteMeta(siteId, result) };
+  });
+  for (const [name, title, path] of [["wordpress_list_redirects", "List redirects", "/redirects"], ["wordpress_get_404_log", "Get 404 log", "/redirects/not-found"]] as const) registerWordPressTool(server, registry, options, { name, title, description: `${title}. Requires redirects.read.`, inputSchema: siteOperationSchema, access: "read" }, async ({ client, siteId }: ToolContext<SiteOperationArgs>) => { const result = await client.get<Record<string, unknown>>(path); return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) }; });
+  const redirectSchema = z.object({ site: siteSchema, source: z.string().min(2), destination: z.string().url(), status: z.union([z.literal(301), z.literal(302), z.literal(307), z.literal(308)]).optional().default(301), confirm: z.boolean().optional().default(false) });
+  type RedirectArgs = z.infer<typeof redirectSchema>;
+  registerWordPressTool(server, registry, options, { name: "wordpress_upsert_redirect", title: "Create or update redirect", description: "Create/update a redirect. Requires redirects.update and confirm: true.", inputSchema: redirectSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<RedirectArgs>) => { if (!args.confirm) return confirmationRequired(`Redirecting "${args.source}" changes public traffic. Re-run with confirm: true.`, withSiteMeta(siteId, { source: args.source, destination: args.destination })); const { confirm: _confirm, ...payload } = wpArgs(args); const result = await client.post<Record<string, unknown>>("/redirects", payload); return { content: [{ type: "text", text: `Saved redirect "${args.source}".` }], structuredContent: withSiteMeta(siteId, result) }; });
+  const deleteRedirectSchema = z.object({ site: siteSchema, source: z.string().min(2), confirm: z.boolean().optional().default(false) });
+  type DeleteRedirectArgs = z.infer<typeof deleteRedirectSchema>;
+  registerWordPressTool(server, registry, options, { name: "wordpress_delete_redirect", title: "Delete redirect", description: "Delete a redirect. Requires redirects.update and confirm: true.", inputSchema: deleteRedirectSchema, access: "delete" }, async ({ client, siteId, args }: ToolContext<DeleteRedirectArgs>) => { if (!args.confirm) return confirmationRequired(`Deleting redirect "${args.source}" changes public traffic. Re-run with confirm: true.`, withSiteMeta(siteId, { source: args.source })); const result = await client.delete<Record<string, unknown>>(`/redirects/${encodeURIComponent(args.source)}`); return { content: [{ type: "text", text: `Deleted redirect "${args.source}".` }], structuredContent: withSiteMeta(siteId, result) }; });
+  const menuSchema = z.object({ site: siteSchema, id: z.number().int().positive().optional(), name: z.string().min(1).optional(), confirm: z.boolean().optional().default(false) });
+  type MenuArgs = z.infer<typeof menuSchema>;
+  for (const [name, title, verb, access] of [["wordpress_create_navigation_menu", "Create navigation menu", "create", "write"], ["wordpress_update_navigation_menu", "Update navigation menu", "update", "write"], ["wordpress_delete_navigation_menu", "Delete navigation menu", "delete", "delete"]] as const) registerWordPressTool(server, registry, options, { name, title, description: `${title}. Requires appearance.update and confirm: true.`, inputSchema: menuSchema, access }, async ({ client, siteId, args }: ToolContext<MenuArgs>) => { if (!args.confirm) return confirmationRequired(`${title} on "${siteId}" changes site navigation. Re-run with confirm: true.`, withSiteMeta(siteId, { id: args.id, name: args.name })); const payload = { ...(args.name ? { name: args.name } : {}) }; const result = verb === "create" ? await client.post<Record<string, unknown>>("/navigation/menus", payload) : verb === "update" ? await client.patch<Record<string, unknown>>(`/navigation/menus/${args.id}`, payload) : await client.delete<Record<string, unknown>>(`/navigation/menus/${args.id}`); return { content: [{ type: "text", text: `${title} on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) }; });
 
   const getRobotsSchema = z.object({ site: siteSchema });
   type GetRobotsArgs = z.infer<typeof getRobotsSchema>;

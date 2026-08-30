@@ -4,6 +4,10 @@ export type DtoKind =
   | "comment"
   | "term"
   | "media"
+  | "plugin"
+  | "theme"
+  | "user"
+  | "settings"
   | "site_limits"
   | "robots"
   | "seo_metadata"
@@ -34,6 +38,8 @@ export type ContentDto = {
   categories?: TermRef[];
   tags?: TermRef[];
   created_at?: string;
+  /** WordPress attachment ID; 0 means the content has no featured image. */
+  featured_media: number;
 };
 
 export type CommentDto = {
@@ -58,6 +64,48 @@ export type MediaDto = {
   mime_type: string;
   file_name: string;
   created_at: string;
+  alt_text?: string;
+  caption?: string;
+  description?: string;
+};
+
+export type SettingsDto = {
+  blogname: string;
+  blogdescription: string;
+  timezone_string: string;
+  date_format: string;
+  time_format: string;
+  start_of_week: number;
+  posts_per_page: number;
+  blog_public: boolean;
+  default_comment_status: string;
+  default_ping_status: string;
+  permalink_structure: string;
+};
+
+export type PluginDto = {
+  plugin: string;
+  name: string;
+  version: string;
+  active: boolean;
+  update_available: boolean;
+};
+
+export type ThemeDto = {
+  stylesheet: string;
+  name: string;
+  version: string;
+  active: boolean;
+  update_available: boolean;
+};
+
+export type UserDto = {
+  id: number;
+  login: string;
+  email: string;
+  display_name: string;
+  roles: string[];
+  registered_at: string;
 };
 
 export type SiteDto = {
@@ -144,10 +192,15 @@ const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
     "categories",
     "tags",
     "created_at",
+    "featured_media",
   ]),
   comment: new Set(["id", "post_id", "author", "content", "status", "created_at"]),
   term: new Set(["id", "name", "slug"]),
-  media: new Set(["id", "title", "url", "mime_type", "file_name", "created_at"]),
+  media: new Set(["id", "title", "url", "mime_type", "file_name", "created_at", "alt_text", "caption", "description"]),
+  plugin: new Set(["plugin", "name", "version", "active", "update_available"]),
+  theme: new Set(["stylesheet", "name", "version", "active", "update_available"]),
+  user: new Set(["id", "login", "email", "display_name", "roles", "registered_at"]),
+  settings: new Set(["blogname", "blogdescription", "timezone_string", "date_format", "time_format", "start_of_week", "posts_per_page", "blog_public", "default_comment_status", "default_ping_status", "permalink_structure"]),
 };
 
 const AUTHOR_REF_FIELDS = new Set(["id", "name"]);
