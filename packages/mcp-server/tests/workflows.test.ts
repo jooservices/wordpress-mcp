@@ -681,6 +681,89 @@ describe("SEO tools", () => {
     expect((result.structuredContent as Record<string, unknown>).title).toBe("New title");
   });
 
+  it("updates title and description together when confirmed, then get_seo read-back matches", async () => {
+    seoMetadata = {
+      id: 42,
+      provider: "yoast",
+      title: "",
+      description: "",
+      canonical: "",
+      og_title: "",
+      og_description: "",
+      noindex: false,
+    };
+
+    const update = await ctx.client.callTool({
+      name: "wordpress_update_seo",
+      arguments: {
+        site: "abc",
+        post_id: 42,
+        title: "MCP Test SEO Title 5760",
+        description: "MCP Test SEO Description 5760",
+        confirm: true,
+      },
+    });
+
+    expect(update.isError).toBeUndefined();
+    expect((update.structuredContent as Record<string, unknown>).title).toBe("MCP Test SEO Title 5760");
+    expect((update.structuredContent as Record<string, unknown>).description).toBe("MCP Test SEO Description 5760");
+
+    const readBack = await ctx.client.callTool({
+      name: "wordpress_get_seo",
+      arguments: { site: "abc", post_id: 42 },
+    });
+
+    expect(readBack.isError).toBeUndefined();
+    expect((readBack.structuredContent as Record<string, unknown>).title).toBe("MCP Test SEO Title 5760");
+    expect((readBack.structuredContent as Record<string, unknown>).description).toBe("MCP Test SEO Description 5760");
+  });
+
+  it("confirm re-call with only title leaves description unchanged (agent-style repro)", async () => {
+    seoMetadata = {
+      id: 42,
+      provider: "yoast",
+      title: "",
+      description: "",
+      canonical: "",
+      og_title: "",
+      og_description: "",
+      noindex: false,
+    };
+
+    const preview = await ctx.client.callTool({
+      name: "wordpress_update_seo",
+      arguments: {
+        site: "abc",
+        post_id: 42,
+        title: "Title only on confirm",
+        description: "Description dropped on confirm",
+      },
+    });
+
+    expect(preview.isError).toBe(true);
+    expect((preview.structuredContent as Record<string, unknown>).changes).toEqual([
+      { field: "title", from: "", to: "Title only on confirm" },
+      { field: "description", from: "", to: "Description dropped on confirm" },
+    ]);
+
+    const confirm = await ctx.client.callTool({
+      name: "wordpress_update_seo",
+      arguments: { site: "abc", post_id: 42, title: "Title only on confirm", confirm: true },
+    });
+
+    expect(confirm.isError).toBeUndefined();
+    expect((confirm.structuredContent as Record<string, unknown>).title).toBe("Title only on confirm");
+    expect((confirm.structuredContent as Record<string, unknown>).description).toBe("");
+
+    const readBack = await ctx.client.callTool({
+      name: "wordpress_get_seo",
+      arguments: { site: "abc", post_id: 42 },
+    });
+
+    expect((readBack.structuredContent as Record<string, unknown>).title).toBe("Title only on confirm");
+    expect((readBack.structuredContent as Record<string, unknown>).description).toBe("");
+  });
+
   it("applies SEO fixes when confirmed", async () => {
     const result = await ctx.client.callTool({
       name: "wordpress_update_seo",

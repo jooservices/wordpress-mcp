@@ -155,6 +155,10 @@ final class SeoService
             $this->writeField($postId, $provider, $field, $fields[$field]);
         }
 
+        if ($provider === 'yoast') {
+            $this->reapplyYoastTextFieldsAfterTitleSave($postId, $fields);
+        }
+
         return $this->getSeoMetadata($postId);
     }
 
@@ -225,6 +229,23 @@ final class SeoService
         }
 
         update_post_meta($postId, $key, sanitize_text_field((string) $value));
+    }
+
+    /**
+     * Yoast hooks on SEO title updates can rebuild indexables and drop metadesc
+     * written earlier in the same request. Re-apply text fields after the first pass.
+     *
+     * @param array<string, mixed> $fields
+     */
+    private function reapplyYoastTextFieldsAfterTitleSave(int $postId, array $fields): void
+    {
+        foreach (['description', 'og_description'] as $field) {
+            if (! array_key_exists($field, $fields)) {
+                continue;
+            }
+
+            $this->writeField($postId, 'yoast', $field, $fields[$field]);
+        }
     }
 
     private function metaKey(string $provider, string $field): string
