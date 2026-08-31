@@ -253,6 +253,13 @@ if (! function_exists('get_post_meta')) {
     {
         $GLOBALS['wp_test_postmeta'][$postId][$key] = $value;
 
+        if (
+            ($GLOBALS['wp_test_yoast_clears_metadesc_on_title'] ?? false)
+            && $key === '_yoast_wpseo_title'
+        ) {
+            unset($GLOBALS['wp_test_postmeta'][$postId]['_yoast_wpseo_metadesc']);
+        }
+
         return true;
     }
 }

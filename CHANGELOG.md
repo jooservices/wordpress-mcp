@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-08-31
+
+### Fixed
+
+- **Yoast SEO metadata (WordPress plugin)**: Updating SEO title and meta description in a single request no longer drops the description. Yoast can clear metadesc when the SEO title meta is saved; the plugin now re-applies description (and Open Graph description) after the first write pass.
+
 ## [1.4.2] - 2026-08-31
 
 ### Fixed

@@ -137,6 +137,54 @@ final class SeoServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_round_trips_title_and_description_together_for_yoast(): void
+    {
+        if (! defined('WPSEO_VERSION')) {
+            define('WPSEO_VERSION', '23.0');
+        }
+
+        $GLOBALS['wp_test_posts'][1] = new WP_Post(1, '');
+
+        $updated = $this->service->updateSeoMetadata(1, [
+            'title' => 'Yoast SEO Title',
+            'description' => 'Yoast SEO Description',
+        ]);
+
+        self::assertSame('yoast', $updated['provider']);
+        self::assertSame('Yoast SEO Title', $updated['title']);
+        self::assertSame('Yoast SEO Description', $updated['description']);
+        self::assertSame('Yoast SEO Title', $GLOBALS['wp_test_postmeta'][1]['_yoast_wpseo_title']);
+        self::assertSame('Yoast SEO Description', $GLOBALS['wp_test_postmeta'][1]['_yoast_wpseo_metadesc']);
+
+        $readBack = $this->service->getSeoMetadata(1);
+        self::assertSame('Yoast SEO Title', $readBack['title']);
+        self::assertSame('Yoast SEO Description', $readBack['description']);
+    }
+
+    #[Test]
+    public function it_keeps_yoast_description_when_title_save_clears_metadesc_in_the_same_request(): void
+    {
+        if (! defined('WPSEO_VERSION')) {
+            define('WPSEO_VERSION', '23.0');
+        }
+
+        $GLOBALS['wp_test_yoast_clears_metadesc_on_title'] = true;
+        $GLOBALS['wp_test_posts'][1] = new WP_Post(1, '');
+
+        try {
+            $updated = $this->service->updateSeoMetadata(1, [
+                'title' => 'Yoast SEO Title',
+                'description' => 'Yoast SEO Description',
+            ]);
+
+            self::assertSame('Yoast SEO Description', $updated['description']);
+            self::assertSame('Yoast SEO Description', $GLOBALS['wp_test_postmeta'][1]['_yoast_wpseo_metadesc']);
+        } finally {
+            unset($GLOBALS['wp_test_yoast_clears_metadesc_on_title']);
+        }
+    }
+
+    #[Test]
     public function it_reads_and_writes_robots_txt_virtually_when_no_physical_file_exists(): void
     {
         $before = $this->service->getRobots();
