@@ -56,8 +56,12 @@ type ToolHandler<TArgs extends Record<string, unknown>> = (ctx: ToolContext<TArg
 interface ToolSpecMeta {
   name: string;
   access: ToolAccess;
+  /** When false, site resolution is skipped (e.g. wordpress_list_sites). Defaults to true. */
+  requiresSite?: boolean;
   dto?: { kind: DtoKind; list?: boolean };
 }
+
+type SessionState = { activeSite: string | undefined };
 
 function withSiteMeta<T extends Record<string, unknown>>(siteId: string, data: T) {
   return { site: siteId, ...data };
@@ -98,27 +102,10 @@ function sanitizeResult(result: ToolResult, dto?: ToolSpecMeta["dto"]): ToolResu
  * The `args` are validated by the SDK's zod schema before this runs, so the
  * single cast from `Record<string, unknown>` to `TArgs` is safe.
  */
-/**
- * Active-site session state. Keyed by `McpServerOptions` because
- * `createMcpServer` runs once per MCP session (one server instance per
- * session), so one options object = one session's workspace state.
- */
-const sessionStateByOptions = new WeakMap<McpServerOptions, { activeSite: string | undefined }>();
-
-function sessionStateFor(options: McpServerOptions): { activeSite: string | undefined } {
-  let state = sessionStateByOptions.get(options);
-
-  if (!state) {
-    state = { activeSite: undefined };
-    sessionStateByOptions.set(options, state);
-  }
-
-  return state;
-}
-
 function withToolExecution<TArgs extends Record<string, unknown>>(
   registry: SiteRegistry,
   options: McpServerOptions,
+  sessionState: SessionState,
   spec: ToolSpecMeta,
   handler: ToolHandler<TArgs>,
 ): (args: Record<string, unknown>) => Promise<ToolResult> {
@@ -136,8 +123,24 @@ function withToolExecution<TArgs extends Record<string, unknown>>(
           return denied;
         }
 
+        if (spec.requiresSite === false) {
+          const result = await handler({
+            client: undefined as unknown as WordPressClient,
+            siteId: "",
+            args: args as TArgs,
+          });
+
+          observability.recordEvent(
+            "mcp.tool.call",
+            { ...tags, outcome: "success" },
+            Date.now() - startedAt,
+          );
+
+          return result.isError ? result : sanitizeResult(result, spec.dto);
+        }
+
         const resolvedSiteId = registry.resolveSiteId(
-          extractSite(args) ?? sessionStateFor(options).activeSite,
+          extractSite(args) ?? sessionState.activeSite,
         );
         const client = registry.getClient(resolvedSiteId);
         tags.site = resolvedSiteId;
@@ -168,6 +171,7 @@ function registerWordPressTool<TShape extends z.ZodRawShape>(
   server: McpServer,
   registry: SiteRegistry,
   options: McpServerOptions,
+  sessionState: SessionState,
   spec: ToolSpecMeta & {
     title: string;
     description: string;
@@ -185,7 +189,7 @@ function registerWordPressTool<TShape extends z.ZodRawShape>(
       inputSchema: spec.inputSchema,
       annotations: ANNOTATIONS[spec.access],
     },
-    withToolExecution(registry, options, spec, handler),
+    withToolExecution(registry, options, sessionState, spec, handler),
   );
 }
 
@@ -201,10 +205,12 @@ function serverInstructions(registry: SiteRegistry): string {
 }
 
 export function createMcpServer(registry: SiteRegistry, options: McpServerOptions): McpServer {
+  const sessionState: SessionState = { activeSite: undefined };
+
   const server = new McpServer(
     {
       name: "wordpress-mcp",
-      version: "1.4.0",
+      version: "1.4.1",
     },
     {
       instructions: serverInstructions(registry),
@@ -215,6 +221,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_sites",
       title: "List configured WordPress sites",
@@ -222,6 +229,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
         "Returns the WordPress sites available on this MCP server (id, name, url). Call this before other tools when multiple sites are configured.",
       inputSchema: z.object({}),
       access: "read",
+      requiresSite: false,
     },
     async () => {
       const sites = registry.listSites();
@@ -241,6 +249,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_set_active_site",
       title: "Set the active WordPress site",
@@ -250,7 +259,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       access: "read",
     },
     async ({ siteId }: ToolContext<SetActiveSiteArgs>) => {
-      sessionStateFor(options).activeSite = siteId;
+      sessionState.activeSite = siteId;
       return {
         content: [{ type: "text", text: `Active site set to "${siteId}" for this session.` }],
         structuredContent: withSiteMeta(siteId, { active_site: siteId }),
@@ -265,6 +274,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_site",
       title: "Get WordPress site info",
@@ -290,6 +300,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_plugins",
       title: "List WordPress plugins",
@@ -318,6 +329,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_install_plugin",
       title: "Install a WordPress.org plugin",
@@ -356,6 +368,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_manage_plugin",
       title: "Manage an installed WordPress plugin",
@@ -410,6 +423,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_themes",
       title: "List WordPress themes",
@@ -438,6 +452,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_install_theme",
       title: "Install a WordPress.org theme",
@@ -475,6 +490,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_manage_theme",
       title: "Manage an installed WordPress theme",
@@ -521,6 +537,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     { name: "wordpress_list_users", title: "List WordPress users", description: "List WordPress users. Requires users.read.", inputSchema: listUsersSchema, access: "read", dto: { kind: "user", list: true } },
     async ({ client, siteId, args }: ToolContext<ListUsersArgs>) => {
       const result = await client.get<PaginatedDto<UserDto>>("/users", wpArgs(args));
@@ -543,6 +560,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     { name: "wordpress_create_user", title: "Create a WordPress user", description: "Create a WordPress user account. Requires users.create and confirm: true.", inputSchema: createUserSchema, access: "write", dto: { kind: "user" } },
     async ({ client, siteId, args }: ToolContext<CreateUserArgs>) => {
       if (!args.confirm) {
@@ -566,6 +584,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     { name: "wordpress_update_user", title: "Update a WordPress user", description: "Update profile or password for a WordPress user. Requires users.update and confirm: true; changing role also requires users.assign_roles.", inputSchema: updateUserSchema, access: "write", dto: { kind: "user" } },
     async ({ client, siteId, args }: ToolContext<UpdateUserArgs>) => {
       if (!args.confirm) return confirmationRequired(`Updating user #${args.id} on site "${siteId}" changes account access. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { action: "update", id: args.id }));
@@ -582,6 +601,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     { name: "wordpress_delete_user", title: "Delete a WordPress user", description: "Delete a WordPress user and optionally reassign their content. Requires users.delete and confirm: true.", inputSchema: deleteUserSchema, access: "delete" },
     async ({ client, siteId, args }: ToolContext<DeleteUserArgs>) => {
       if (!args.confirm) return confirmationRequired(`Deleting user #${args.id} on site "${siteId}" is irreversible. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { action: "delete", id: args.id, reassign: args.reassign ?? null }));
@@ -607,6 +627,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_mcp_activity",
       title: "Get MCP request activity for a WordPress site",
@@ -651,6 +672,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_search_content",
       title: "Search WordPress content",
@@ -676,6 +698,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_content",
       title: "Get WordPress content by ID",
@@ -724,6 +747,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_create_content",
       title: "Create WordPress draft content",
@@ -768,6 +792,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_post_templates",
       title: "List WordPress post templates",
@@ -822,6 +847,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_update_content",
       title: "Update WordPress content",
@@ -890,6 +916,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_delete_content",
       title: "Delete WordPress content",
@@ -942,6 +969,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_comments",
       title: "List WordPress comments",
@@ -968,6 +996,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_comment",
       title: "Get WordPress comment",
@@ -996,6 +1025,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_moderate_comment",
       title: "Moderate WordPress comment",
@@ -1025,6 +1055,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_terms",
       title: "List WordPress taxonomy terms",
@@ -1054,6 +1085,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_media",
       title: "List WordPress media",
@@ -1088,6 +1120,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_media",
       title: "Get WordPress media",
@@ -1143,6 +1176,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_upload_media",
       title: "Upload WordPress media",
@@ -1182,7 +1216,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   type UpdateMediaArgs = z.infer<typeof updateMediaSchema>;
 
   registerWordPressTool(
-    server, registry, options,
+    server, registry, options, sessionState,
     { name: "wordpress_update_media", title: "Update WordPress media", description: "Update media title, alt text, caption, or description. Requires media.update and confirm: true.", inputSchema: updateMediaSchema, access: "write", dto: { kind: "media" } },
     async ({ client, siteId, args }: ToolContext<UpdateMediaArgs>) => {
       if (!args.confirm) return confirmationRequired(`Updating media #${args.id} on site "${siteId}" changes published metadata. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { id: args.id }));
@@ -1196,7 +1230,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   type DeleteMediaArgs = z.infer<typeof deleteMediaSchema>;
 
   registerWordPressTool(
-    server, registry, options,
+    server, registry, options, sessionState,
     { name: "wordpress_delete_media", title: "Delete WordPress media", description: "Permanently delete a media item. Requires media.delete and confirm: true.", inputSchema: deleteMediaSchema, access: "delete" },
     async ({ client, siteId, args }: ToolContext<DeleteMediaArgs>) => {
       if (!args.confirm) return confirmationRequired(`Deleting media #${args.id} on site "${siteId}" is permanent. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { id: args.id }));
@@ -1211,7 +1245,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   type UpdateSiteSettingsArgs = z.infer<typeof updateSiteSettingsSchema>;
 
   registerWordPressTool(
-    server, registry, options,
+    server, registry, options, sessionState,
     { name: "wordpress_update_site_settings", title: "Update WordPress site settings", description: "Update the curated site settings exposed by this connector. Requires settings.update and confirm: true.", inputSchema: updateSiteSettingsSchema, access: "write", dto: { kind: "settings" } },
     async ({ client, siteId, args }: ToolContext<UpdateSiteSettingsArgs>) => {
       if (!args.confirm) return confirmationRequired(`Updating site settings on "${siteId}" can change public behavior and SEO. Re-run with confirm: true to proceed.`, withSiteMeta(siteId, { changing: Object.keys(args).filter((key) => !["site", "confirm"].includes(key)) }));
@@ -1228,6 +1262,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_list_navigation_menus",
       title: "List WordPress navigation menus",
@@ -1243,7 +1278,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
 
   const maintenanceSchema = z.object({ site: siteSchema, enabled: z.boolean(), confirm: z.boolean().optional().default(false) });
   type MaintenanceArgs = z.infer<typeof maintenanceSchema>;
-  registerWordPressTool(server, registry, options, { name: "wordpress_set_maintenance_mode", title: "Set WordPress maintenance mode", description: "Enable or disable site-wide maintenance mode. Requires site.maintenance and confirm: true.", inputSchema: maintenanceSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<MaintenanceArgs>) => {
+  registerWordPressTool(server, registry, options, sessionState, { name: "wordpress_set_maintenance_mode", title: "Set WordPress maintenance mode", description: "Enable or disable site-wide maintenance mode. Requires site.maintenance and confirm: true.", inputSchema: maintenanceSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<MaintenanceArgs>) => {
     if (!args.confirm) return confirmationRequired(`Changing maintenance mode on "${siteId}" changes public site availability. Re-run with confirm: true.`, withSiteMeta(siteId, { enabled: args.enabled }));
     const { confirm: _confirm, ...payload } = wpArgs(args); const result = await client.patch<Record<string, unknown>>("/maintenance", payload);
     return { content: [{ type: "text", text: `Maintenance mode ${args.enabled ? "enabled" : "disabled"} on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
@@ -1251,19 +1286,19 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
 
   const coreUpdateSchema = z.object({ site: siteSchema, confirm: z.boolean().optional().default(false) });
   type CoreUpdateArgs = z.infer<typeof coreUpdateSchema>;
-  registerWordPressTool(server, registry, options, { name: "wordpress_update_core", title: "Update WordPress core", description: "Install the currently offered WordPress core update. Requires core.update and confirm: true.", inputSchema: coreUpdateSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<CoreUpdateArgs>) => {
+  registerWordPressTool(server, registry, options, sessionState, { name: "wordpress_update_core", title: "Update WordPress core", description: "Install the currently offered WordPress core update. Requires core.update and confirm: true.", inputSchema: coreUpdateSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<CoreUpdateArgs>) => {
     if (!args.confirm) return confirmationRequired(`Updating WordPress core on "${siteId}" can change all site behavior. Ensure a backup exists, then re-run with confirm: true.`, withSiteMeta(siteId, {}));
     const result = await client.post<Record<string, unknown>>("/updates/core", {}); return { content: [{ type: "text", text: `Core update started on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
   });
 
   const contentIdSchema = z.object({ site: siteSchema, id: z.number().int().positive() });
   type ContentIdArgs = z.infer<typeof contentIdSchema>;
-  registerWordPressTool(server, registry, options, { name: "wordpress_list_revisions", title: "List WordPress revisions", description: "List post or page revisions. Requires the matching *.revisions.read scope.", inputSchema: contentIdSchema, access: "read" }, async ({ client, siteId, args }: ToolContext<ContentIdArgs>) => {
+  registerWordPressTool(server, registry, options, sessionState, { name: "wordpress_list_revisions", title: "List WordPress revisions", description: "List post or page revisions. Requires the matching *.revisions.read scope.", inputSchema: contentIdSchema, access: "read" }, async ({ client, siteId, args }: ToolContext<ContentIdArgs>) => {
     const result = await client.get<Record<string, unknown>>(`/content/${args.id}/revisions`); return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) };
   });
   const revisionSchema = z.object({ site: siteSchema, id: z.number().int().positive(), confirm: z.boolean().optional().default(false) });
   type RevisionArgs = z.infer<typeof revisionSchema>;
-  registerWordPressTool(server, registry, options, { name: "wordpress_restore_revision", title: "Restore WordPress revision", description: "Restore a content revision. Requires matching *.revisions.restore scope and confirm: true.", inputSchema: revisionSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<RevisionArgs>) => {
+  registerWordPressTool(server, registry, options, sessionState, { name: "wordpress_restore_revision", title: "Restore WordPress revision", description: "Restore a content revision. Requires matching *.revisions.restore scope and confirm: true.", inputSchema: revisionSchema, access: "write" }, async ({ client, siteId, args }: ToolContext<RevisionArgs>) => {
     if (!args.confirm) return confirmationRequired(`Restoring revision #${args.id} on "${siteId}" overwrites current content. Re-run with confirm: true.`, withSiteMeta(siteId, { id: args.id })); const result = await client.post<Record<string, unknown>>(`/revisions/${args.id}/restore`, {}); return { content: [{ type: "text", text: `Restored revision #${args.id}.` }], structuredContent: withSiteMeta(siteId, result) };
   });
   const getRedirectsSchema = z.object({
@@ -1276,6 +1311,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_redirects",
       title: "Get redirects and optional 404 log",
@@ -1312,6 +1348,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_manage_redirect",
       title: "Create, update, or delete a redirect",
@@ -1365,6 +1402,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_manage_navigation_menu",
       title: "Create, update, or delete a navigation menu",
@@ -1409,6 +1447,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_robots",
       title: "Get robots.txt",
@@ -1441,6 +1480,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_update_robots",
       title: "Update robots.txt",
@@ -1477,6 +1517,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_get_seo",
       title: "Get SEO metadata and optional audit",
@@ -1537,6 +1578,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     server,
     registry,
     options,
+    sessionState,
     {
       name: "wordpress_update_seo",
       title: "Update SEO metadata for a post/page",
