@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-08-30
+
+### Fixed
+
+- **Multi-site routing (MCP server only)**: `wordpress_list_sites` no longer requires site resolution and works when multiple WordPress sites are configured. Per-session active site state is scoped to the MCP server instance so `wordpress_set_active_site` correctly applies to subsequent tool calls in the same session.
+
 ## [1.4.0] - 2026-08-30
 
 ### Added
@@ -169,7 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.0...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.1...develop
+[1.4.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.1...v1.3.0
 [1.2.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.0...v1.2.1
