@@ -7,6 +7,8 @@ import { setupOAuth, type OAuthRuntime } from "./auth/setup.js";
 import { runWithAuth } from "./auth/context.js";
 import { createMcpServer } from "./mcp/server.js";
 import { createObservabilityHandler } from "./mcp/observability.js";
+import { ActiveSiteStore } from "./mcp/activeSiteStore.js";
+import { runWithMcpSession } from "./mcp/mcpSessionContext.js";
 import { SessionManager } from "./mcp/sessionManager.js";
 import { SUPPORTED_PROTOCOL_VERSIONS, patchVersionNegotiation } from "./mcp/versionNegotiator.js";
 import { SiteRegistry } from "./sites/registry.js";
@@ -18,6 +20,7 @@ const sessions = new SessionManager({
   maxSessions: config.mcpMaxSessions,
   idleTimeoutMs: config.mcpSessionIdleMs,
 });
+const activeSiteStore = new ActiveSiteStore({ maxEntries: config.mcpMaxSessions * 4 });
 
 let oauthRuntime: OAuthRuntime | undefined;
 
@@ -56,6 +59,7 @@ function getMcpServerOptions() {
     enabledTools: config.mcpEnabledTools,
     observability,
     protocolVersionPolicy: config.mcpProtocolVersionPolicy,
+    activeSiteStore,
   };
 }
 
@@ -79,7 +83,7 @@ app.get("/health", (_req, res) => {
   res.json({
     status: "ok",
     service: "wordpress-mcp",
-    version: "1.4.1",
+    version: "1.4.2",
     authMode: config.mcpAuthMode,
     sites: siteRegistry.listSites(),
     protocolVersions: SUPPORTED_PROTOCOL_VERSIONS,
@@ -135,7 +139,9 @@ async function handleMcpPost(req: Request, res: Response): Promise<void> {
 
       const server = getServer();
       await server.connect(transport);
-      await runWithAuth(req.auth, () => transport.handleRequest(req, res, req.body));
+      await runWithMcpSession(transport.sessionId, () =>
+        runWithAuth(req.auth, () => transport.handleRequest(req, res, req.body)),
+      );
       return;
     } else {
       res.status(400).json({
@@ -146,7 +152,9 @@ async function handleMcpPost(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    await runWithAuth(req.auth, () => transport.handleRequest(req, res, req.body));
+    await runWithMcpSession(sessionId, () =>
+      runWithAuth(req.auth, () => transport.handleRequest(req, res, req.body)),
+    );
   } catch (error) {
     console.error("MCP error:", error instanceof Error ? error.message : error);
     if (!res.headersSent) {
@@ -196,7 +204,9 @@ app.get("/mcp", mcpAuthMiddleware, async (req, res) => {
     return;
   }
 
-  await runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res));
+  await runWithMcpSession(sessionId, () =>
+    runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res)),
+  );
 });
 
 app.delete("/mcp", mcpAuthMiddleware, async (req, res) => {
@@ -206,7 +216,9 @@ app.delete("/mcp", mcpAuthMiddleware, async (req, res) => {
     return;
   }
 
-  await runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res));
+  await runWithMcpSession(sessionId, () =>
+    runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res)),
+  );
 });
 
 app.listen(config.port, config.host, () => {

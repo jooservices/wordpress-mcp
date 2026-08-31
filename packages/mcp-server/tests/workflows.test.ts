@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { McpServerOptions } from "../src/mcp/auth.js";
+import { ActiveSiteStore } from "../src/mcp/activeSiteStore.js";
 import { NullObservabilityHandler } from "../src/mcp/observability.js";
 import { createMcpServer } from "../src/mcp/server.js";
 import { SiteRegistry } from "../src/sites/registry.js";
@@ -207,6 +208,7 @@ async function startServer(optionsOverrides: Partial<McpServerOptions> = {}): Pr
     disabledTools: new Set(),
     observability: new NullObservabilityHandler(),
     protocolVersionPolicy: "fallback",
+    activeSiteStore: new ActiveSiteStore({ maxEntries: 100 }),
     ...optionsOverrides,
   };
 
@@ -441,6 +443,46 @@ describe("multi-site routing", () => {
     expect(result.isError).toBeUndefined();
     expect(result.structuredContent?.site).toBe("xyz");
     expect(ctx.calls.some((call) => call.url.startsWith("https://xyz.com/"))).toBe(true);
+  });
+
+  it("persists active site across separate MCP server instances (stateless HTTP simulation)", async () => {
+    const store = new ActiveSiteStore({ maxEntries: 100 });
+    const baseOptions: McpServerOptions = {
+      authMode: "static",
+      disabledTools: new Set(),
+      observability: new NullObservabilityHandler(),
+      protocolVersionPolicy: "fallback",
+      activeSiteStore: store,
+    };
+
+    const [transportA, serverTransportA] = InMemoryTransport.createLinkedPair();
+    const serverA = createMcpServer(new SiteRegistry(sites), baseOptions);
+    await serverA.connect(serverTransportA);
+    const clientA = new Client({ name: "stateless-a", version: "1.0.0" });
+    await clientA.connect(transportA);
+    await clientA.callTool({ name: "wordpress_set_active_site", arguments: { site: "xyz" } });
+    await clientA.close();
+
+    const calls: Array<{ url: string }> = [];
+    vi.stubGlobal("fetch", (input: string, init?: { method?: string }) => {
+      calls.push({ url: String(input) });
+      return Promise.resolve(fetchRouter(String(input), init));
+    });
+
+    const [transportB, serverTransportB] = InMemoryTransport.createLinkedPair();
+    const serverB = createMcpServer(new SiteRegistry(sites), baseOptions);
+    await serverB.connect(serverTransportB);
+    const clientB = new Client({ name: "stateless-b", version: "1.0.0" });
+    await clientB.connect(transportB);
+
+    const result = await clientB.callTool({ name: "wordpress_get_site", arguments: {} });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent?.site).toBe("xyz");
+    expect(calls.some((call) => call.url.startsWith("https://xyz.com/"))).toBe(true);
+
+    await clientB.close();
+    vi.unstubAllGlobals();
   });
 });
 

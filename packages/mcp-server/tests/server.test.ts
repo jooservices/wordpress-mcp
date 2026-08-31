@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ActiveSiteStore } from "../src/mcp/activeSiteStore.js";
 import { createMcpServer } from "../src/mcp/server.js";
 import { getToolAccess } from "../src/mcp/toolPolicy.js";
 import { NullObservabilityHandler } from "../src/mcp/observability.js";
@@ -12,6 +13,7 @@ const options: McpServerOptions = {
   disabledTools: new Set(),
   observability: new NullObservabilityHandler(),
   protocolVersionPolicy: "fallback",
+  activeSiteStore: new ActiveSiteStore({ maxEntries: 100 }),
 };
 
 const EXPECTED_TOOL_ACCESS: Record<string, "read" | "write" | "delete"> = {
@@ -68,5 +70,6 @@ describe("createMcpServer", () => {
     }
 
     expect(Object.keys(EXPECTED_TOOL_ACCESS).length).toBe(42);
+    expect(getToolAccess("wordpress_get_site_limits")).toBeUndefined();
   });
 });
