@@ -3,7 +3,7 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.4.1-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-1.4.2-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
