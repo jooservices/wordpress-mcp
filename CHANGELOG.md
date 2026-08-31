@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-08-31
+
+### Fixed
+
+- **Active site persistence (MCP server)**: `wordpress_set_active_site` now stores the preference in a process-wide store keyed by OAuth access token (primary) or MCP session id (fallback), so clients such as ChatGPT that open a new MCP session per tool call still resolve the active site within the same linked OAuth connection.
+
+### Changed
+
+- Tool descriptions and server instructions clarify that `wordpress_get_site` includes PHP upload limits (replaces removed `wordpress_get_site_limits`) and document the correct multi-site workflow for MCP clients.
+
 ## [1.4.1] - 2026-08-30
 
 ### Fixed
@@ -175,7 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.1...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...develop
+[1.4.2]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.2.1...v1.3.0
