@@ -422,6 +422,28 @@ describe("plugin management", () => {
   });
 });
 
+describe("multi-site routing", () => {
+  it("lists configured sites without a site parameter", async () => {
+    const result = await ctx.client.callTool({ name: "wordpress_list_sites", arguments: {} });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent?.items).toEqual([
+      { id: "abc", name: "ABC", url: "https://abc.com" },
+      { id: "xyz", name: "XYZ", url: "https://xyz.com" },
+    ]);
+  });
+
+  it("resolves the active site for site-scoped tools after set_active_site", async () => {
+    await ctx.client.callTool({ name: "wordpress_set_active_site", arguments: { site: "xyz" } });
+
+    const result = await ctx.client.callTool({ name: "wordpress_get_site", arguments: {} });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent?.site).toBe("xyz");
+    expect(ctx.calls.some((call) => call.url.startsWith("https://xyz.com/"))).toBe(true);
+  });
+});
+
 describe("session-aware active site", () => {
   it("uses the active site when the site parameter is omitted", async () => {
     await ctx.client.callTool({ name: "wordpress_set_active_site", arguments: { site: "xyz" } });
