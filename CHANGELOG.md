@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-09-01
+
+### Fixed
+
+- **Orphan media adoption idempotency (WordPress plugin)**: `wordpress_adopt_orphan_media` could create a duplicate attachment when the same orphan path was adopted again after WordPress renamed the file to a `-scaled` variant during big-image metadata generation. Adoption now records the original orphan path on a dedicated postmeta key, retroactively recognizes attachments scaled before this fix via WordPress's own `original_image` metadata, and refuses to adopt when a file already occupies the derived `-scaled` path rather than risking WordPress silently overwriting or renaming around it. An orphan whose own filename is already a `-scaled` derivative is adopted as-is instead of being scaled a second time. The cached orphan-scan result drops a path as soon as it resolves to an attachment, new insert or existing match alike.
+- **Adoption no longer fails over a cosmetic title mismatch (WordPress plugin)**: WordPress core can legitimately rewrite `post_title` on save (e.g. `wp_encode_emoji()` converting emoji to HTML entities on legacy `utf8`, non-`utf8mb4`, database columns) independent of the file itself. `wordpress_adopt_orphan_media` previously deleted an already-verified-good attachment whenever this produced a text mismatch; the mismatch is now recorded (`metadata_mismatch` on the verification result) instead of failing the adoption. File integrity checks (SHA256, decode, dimensions, mime, public URL) are unchanged.
+
+### Added
+
+- **JOOservices → Media orphan table**: orphan file rows now show MIME type, file size, and image dimensions (read via `getimagesize()`, not a full file read). Row actions (view, delete) use icon buttons. Rows whose filename ends in `-scaled` are flagged as a likely — but unverified — scaled derivative rather than a standalone original.
+
 ## [1.4.4] - 2026-09-01
 
 ### Added
@@ -203,7 +214,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...develop
+[1.4.5]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.1...v1.4.2
