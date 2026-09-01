@@ -44,6 +44,7 @@ const EXPECTED_TOOL_ACCESS: Record<string, "read" | "write" | "delete"> = {
   wordpress_list_media: "read",
   wordpress_get_media: "read",
   wordpress_get_media_orphans: "read",
+  wordpress_find_broken_media_references: "read",
   wordpress_upload_media: "write",
   wordpress_update_media: "write",
   wordpress_delete_media: "delete",
@@ -70,7 +71,7 @@ describe("createMcpServer", () => {
       expect(getToolAccess(name)).toBe(access);
     }
 
-    expect(Object.keys(EXPECTED_TOOL_ACCESS).length).toBe(43);
+    expect(Object.keys(EXPECTED_TOOL_ACCESS).length).toBe(44);
     expect(getToolAccess("wordpress_get_site_limits")).toBeUndefined();
   });
 });

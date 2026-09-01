@@ -1141,6 +1141,33 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
+  const findBrokenMediaReferencesSchema = z.object({
+    site: siteSchema,
+    post_id: z.number().int().positive().optional().describe("Limit to one post/page. Omit to scan the most recent 200 published posts/pages."),
+  });
+  type FindBrokenMediaReferencesArgs = z.infer<typeof findBrokenMediaReferencesSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_find_broken_media_references",
+      title: "Find broken inline media references",
+      description:
+        "Scans post/page content for wp-image-{ID} references where {ID} no longer resolves to a real attachment (e.g. after a migration). For each broken reference, checks the exact file path named in its own src against the cached media-orphan scan (wordpress_get_media_orphans) — matched_orphan_url is set only on an exact path match, never a filename guess; null means the source file itself is gone and cannot be recovered. Read-only: to fix a match, upload matched_orphan_url's file with wordpress_upload_media, then rewrite the post's content (replacing the broken id and src) with wordpress_update_content (confirm: true).",
+      inputSchema: findBrokenMediaReferencesSchema,
+      access: "read",
+    },
+    async ({ client, siteId, args }: ToolContext<FindBrokenMediaReferencesArgs>) => {
+      const result = await client.get("/media/broken-references", { post_id: args.post_id });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: withSiteMeta(siteId, result as Record<string, unknown>),
+      };
+    },
+  );
+
   const uploadMediaSchema = z.object({
     site: siteSchema,
     title: z.string().min(1).describe("Human-readable image subject. With image_type, WordPress builds the stored filename as slug(title)-slug(image_type).ext."),
