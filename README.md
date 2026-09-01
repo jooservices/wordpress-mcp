@@ -3,7 +3,7 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.4.4-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-1.4.5-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
@@ -12,11 +12,11 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.4.4
+## About v1.4.5
 
 | | |
 | --- | --- |
-| Status | **v1.4.4 — media orphan recovery (scan, broken-reference finder, no-reupload adoption)** |
+| Status | **v1.4.5 — orphan adoption idempotency fixes, cosmetic-title tolerance, Media table detail** |
 | Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
 | Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
@@ -30,7 +30,7 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 - Rate limiting and a full request audit log (reads, writes, and denials), with retention and CSV export
 - Default create = draft; publish gated by scope
 - Upload hardening: content sniffing + executable-extension blocklist
-- **JOOservices → Media** wp-admin page: daily-cached scan for broken attachments (missing file) and orphan files (no attachment record), with a confirm-gated delete action
+- **JOOservices → Media** wp-admin page: daily-cached scan for broken attachments (missing file) and orphan files (no attachment record) — orphan rows show MIME type, size, and dimensions — with icon-button view/confirm-gated-delete actions
 
 **MCP server**
 

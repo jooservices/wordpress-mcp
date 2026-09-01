@@ -4,6 +4,20 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+if (! function_exists('__return_false')) {
+    function __return_false(): bool
+    {
+        return false;
+    }
+}
+
+if (! defined('OBJECT')) {
+    define('OBJECT', 'OBJECT');
+    define('OBJECT_K', 'OBJECT_K');
+    define('ARRAY_A', 'ARRAY_A');
+    define('ARRAY_N', 'ARRAY_N');
+}
+
 if (! function_exists('sanitize_key')) {
     function sanitize_key(string $key): string
     {
@@ -26,6 +40,23 @@ if (! defined('ABSPATH')) {
     }
 
     define('ABSPATH', $absPath);
+
+    // adoptOrphan() require_once's these; the functions they'd define in
+    // real WordPress (wp_generate_attachment_metadata, etc.) are stubbed
+    // directly below instead, so these just need to exist and be empty.
+    $wpAdminIncludes = $absPath . 'wp-admin/includes/';
+
+    if (! is_dir($wpAdminIncludes)) {
+        mkdir($wpAdminIncludes, 0777, true);
+    }
+
+    foreach (['file.php', 'media.php', 'image.php'] as $stubFile) {
+        $stubPath = $wpAdminIncludes . $stubFile;
+
+        if (! is_file($stubPath)) {
+            file_put_contents($stubPath, "<?php\n");
+        }
+    }
 }
 
 if (! function_exists('get_bloginfo')) {
@@ -153,6 +184,13 @@ if (! function_exists('apply_filters')) {
     function add_filter(string $tag, callable $callback): void
     {
         $GLOBALS['wp_test_filters'][$tag] = $callback;
+    }
+
+    function remove_filter(string $tag, callable $callback): bool
+    {
+        unset($GLOBALS['wp_test_filters'][$tag]);
+
+        return true;
     }
 
     function apply_filters(string $tag, mixed $value, mixed ...$args): mixed
@@ -543,4 +581,195 @@ if (! function_exists('get_post_modified_time')) {
     {
         return '2026-01-01T00:00:00+00:00';
     }
+}
+
+if (! function_exists('get_post_time')) {
+    function get_post_time(string $format, bool $gmt, int $postId): string
+    {
+        return '2026-01-01T00:00:00+00:00';
+    }
+}
+
+if (! function_exists('wp_update_post')) {
+    function wp_update_post(array $postarr): int
+    {
+        $id = (int) ($postarr['ID'] ?? 0);
+        $post = get_post($id);
+
+        if (! $post instanceof WP_Post) {
+            return 0;
+        }
+
+        if (isset($postarr['post_title'])) {
+            $submitted = (string) $postarr['post_title'];
+            // Simulates WordPress core rewriting post_title on save (e.g.
+            // wp_encode_emoji() on a legacy utf8 DB column) — tests set
+            // $GLOBALS['wp_test_title_save_transform'][$submitted] to the
+            // value WP would actually persist.
+            $stored = $GLOBALS['wp_test_title_save_transform'][$submitted] ?? $submitted;
+            $post->post_title = $stored;
+            $GLOBALS['wp_test_post_titles'][$id] = $stored;
+        }
+
+        if (isset($postarr['post_excerpt'])) {
+            $post->post_excerpt = (string) $postarr['post_excerpt'];
+            $GLOBALS['wp_test_post_fields'][$id]['post_excerpt'] = $post->post_excerpt;
+        }
+
+        if (isset($postarr['post_content'])) {
+            $post->post_content = (string) $postarr['post_content'];
+            $GLOBALS['wp_test_post_fields'][$id]['post_content'] = $post->post_content;
+        }
+
+        return $id;
+    }
+}
+
+if (! function_exists('wp_insert_attachment')) {
+    /** @var int $GLOBALS['wp_test_next_attachment_id'] */
+    $GLOBALS['wp_test_next_attachment_id'] = 9000;
+
+    function wp_insert_attachment(array $postarr, string $file = ''): int
+    {
+        $id = $GLOBALS['wp_test_next_attachment_id']++;
+
+        $post = new WP_Post($id, (string) ($postarr['post_content'] ?? ''), 'attachment');
+        $post->post_title = (string) ($postarr['post_title'] ?? '');
+        $post->post_status = (string) ($postarr['post_status'] ?? 'inherit');
+
+        $GLOBALS['wp_test_posts'][$id] = $post;
+        $GLOBALS['wp_test_post_titles'][$id] = $post->post_title;
+        $GLOBALS['wp_test_attachment_mimes'][$id] = (string) ($postarr['post_mime_type'] ?? '');
+        $GLOBALS['wp_test_attachment_files'][$id] = $file;
+
+        $uploadDir = wp_upload_dir();
+        $relative = ltrim(str_replace((string) $uploadDir['basedir'], '', $file), '/');
+        $GLOBALS['wp_test_attachment_urls'][$id] = $uploadDir['baseurl'] . '/' . $relative;
+
+        update_post_meta($id, '_wp_attached_file', $relative);
+
+        return $id;
+    }
+}
+
+if (! function_exists('wp_generate_attachment_metadata')) {
+    /**
+     * Real WordPress renames the attached file to a `-scaled` variant here
+     * for oversized images. Tests simulate that by pre-registering a target
+     * path in $GLOBALS['wp_test_scale_rename'][$file].
+     */
+    function wp_generate_attachment_metadata(int $attachmentId, string $file): array
+    {
+        $thresholdEnabled = apply_filters('big_image_size_threshold', 2560) !== false;
+        $renameTo = $thresholdEnabled ? ($GLOBALS['wp_test_scale_rename'][$file] ?? null) : null;
+
+        if (is_string($renameTo) && $renameTo !== '') {
+            $uploadDir = wp_upload_dir();
+            $relative = ltrim(str_replace((string) $uploadDir['basedir'], '', $renameTo), '/');
+
+            $GLOBALS['wp_test_attachment_files'][$attachmentId] = $renameTo;
+            $GLOBALS['wp_test_attachment_urls'][$attachmentId] = $uploadDir['baseurl'] . '/' . $relative;
+            update_post_meta($attachmentId, '_wp_attached_file', $relative);
+        }
+
+        return [
+            'width' => 100,
+            'height' => 100,
+            'sizes' => ['full' => ['file' => basename((string) ($GLOBALS['wp_test_attachment_files'][$attachmentId] ?? $file))]],
+        ];
+    }
+}
+
+if (! function_exists('wp_update_attachment_metadata')) {
+    function wp_update_attachment_metadata(int $attachmentId, array $metadata): bool
+    {
+        $GLOBALS['wp_test_attachment_metadata'][$attachmentId] = $metadata;
+
+        return true;
+    }
+}
+
+if (! class_exists('wpdb')) {
+    /**
+     * Minimal stand-in for the exact query shape MediaService::adoptOrphan()
+     * runs against `_wp_attached_file` postmeta — not a general SQL engine.
+     * Reads from the same $GLOBALS['wp_test_postmeta'] store as
+     * get_post_meta()/update_post_meta() so it can't drift out of sync.
+     */
+    class wpdb
+    {
+        public string $posts = 'wp_posts';
+
+        public string $postmeta = 'wp_postmeta';
+
+        public function prepare(string $query, mixed ...$args): string
+        {
+            if (count($args) === 1 && is_array($args[0])) {
+                $args = $args[0];
+            }
+
+            $i = 0;
+
+            return (string) preg_replace_callback('/%[sd]/', static function (array $m) use ($args, &$i): string {
+                $value = $args[$i] ?? '';
+                $i++;
+
+                return $m[0] === '%d' ? (string) (int) $value : "'" . addslashes((string) $value) . "'";
+            }, $query);
+        }
+
+        public function get_var(string $query): ?string
+        {
+            if (! preg_match("/meta_key = '([^']*)' AND meta_value = '(.*)' (?:ORDER BY post_id ASC )?LIMIT 1/s", $query, $m)) {
+                return null;
+            }
+
+            [, $key, $value] = $m;
+            $value = stripslashes($value);
+
+            $matches = [];
+
+            foreach ($GLOBALS['wp_test_postmeta'] ?? [] as $postId => $meta) {
+                if (($meta[$key] ?? null) === $value) {
+                    $matches[] = (int) $postId;
+                }
+            }
+
+            if ($matches === []) {
+                return null;
+            }
+
+            sort($matches);
+
+            return (string) $matches[0];
+        }
+
+        /**
+         * Stands in for MediaOrphanScanner::knownRelativePaths()' first
+         * query (all `_wp_attached_file` values). Tests that need known
+         * attachments to exist set $GLOBALS['wp_test_wpdb_col_results'];
+         * an empty default matches "no attachments registered yet".
+         *
+         * @return list<string>
+         */
+        public function get_col(string $query): array
+        {
+            return $GLOBALS['wp_test_wpdb_col_results'] ?? [];
+        }
+
+        /**
+         * Stands in for both MediaOrphanScanner queries that return rows
+         * (broken-attachments join, and `_wp_attachment_metadata` values).
+         * Tests set $GLOBALS['wp_test_wpdb_row_results'] for whichever one
+         * they're exercising; an empty default matches "nothing registered".
+         *
+         * @return list<array<string, mixed>>
+         */
+        public function get_results(string $query, mixed ...$args): array
+        {
+            return $GLOBALS['wp_test_wpdb_row_results'] ?? [];
+        }
+    }
+
+    $GLOBALS['wpdb'] = new wpdb();
 }

@@ -14,6 +14,14 @@ use WP_Query;
 
 final class MediaService
 {
+    /**
+     * Remembers the orphan-scan path an attachment was adopted from, so a
+     * re-adopt of that same path still resolves to it even after WordPress
+     * renames the attached file (e.g. `-scaled` for big images) — see
+     * {@see findAttachmentBySourcePath()}.
+     */
+    private const SOURCE_PATH_META_KEY = '_jooservices_orphan_source_path';
+
     /** @var list<string> */
     private const BLOCKED_EXTENSIONS = [
         'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
@@ -209,7 +217,14 @@ final class MediaService
      *
      * Idempotent: if the file was already adopted (e.g. two broken posts
      * pointing at the same orphan), returns the existing attachment instead
-     * of inserting a second record for the same file.
+     * of inserting a second record for the same file. Matched, in order:
+     * {@see SOURCE_PATH_META_KEY} (adoptions made after this fix),
+     * {@see findAttachmentByScaledVariant()} (adoptions made before it, via
+     * WordPress's own `original_image` record), then `_wp_attached_file`
+     * verbatim. A lookup keyed on `_wp_attached_file` alone misses a re-adopt
+     * of the same original path — WordPress rewrites that meta to a
+     * `-scaled` filename during metadata generation for big images — and
+     * creates a duplicate attachment pointing at the same physical file.
      *
      * @param array<string, mixed> $data
      * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
@@ -260,7 +275,9 @@ final class MediaService
         }
 
         $fallbackTitle = sanitize_file_name((string) pathinfo(basename($relativePath), PATHINFO_FILENAME));
-        $existingId = $this->findExistingAttachmentByRelativePath($relativePath);
+        $existingId = $this->findAttachmentBySourcePath($relativePath)
+            ?? $this->findAttachmentByScaledVariant($relativePath)
+            ?? $this->findAttachmentByAttachedFile($relativePath);
         $isNewAdoption = $existingId === null;
         $title = trim(sanitize_text_field((string) ($data['title'] ?? '')));
 
@@ -269,6 +286,22 @@ final class MediaService
         }
 
         if ($isNewAdoption) {
+            // No attachment claims the derived `-scaled` path (the lookups
+            // above would have matched it via findAttachmentByScaledVariant()
+            // otherwise), but a physical file can still sit there — e.g. its
+            // owning attachment was deleted, or it's an unrelated orphan that
+            // coincidentally shares the name (this site's own orphan scan has
+            // both plain "-scaled" and WP-uniquified "-scaled-1" leftovers).
+            // Whether WordPress's scaling then overwrites that file in place
+            // or renames around it depends on core internals we don't
+            // control; either outcome is a problem we can avoid entirely by
+            // refusing up front instead of gambling on which one happens.
+            $scaledRelative = $this->deriveScaledRelativePath($relativePath);
+
+            if ($scaledRelative !== null && is_file($basedir . '/' . $scaledRelative)) {
+                return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.scaled_variant_exists');
+            }
+
             require_once ABSPATH . 'wp-admin/includes/file.php';
             require_once ABSPATH . 'wp-admin/includes/media.php';
             require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -285,7 +318,30 @@ final class MediaService
             }
 
             $attachmentId = (int) $inserted;
-            $metadata = wp_generate_attachment_metadata($attachmentId, $full);
+            update_post_meta($attachmentId, self::SOURCE_PATH_META_KEY, $relativePath);
+
+            // The file being adopted is itself already a `-scaled` derivative
+            // (e.g. a genuine original was scaled once, then that original
+            // was later orphaned and only the derivative remains). Without
+            // this, WordPress's own big-image handling can scale it *again*,
+            // producing "-scaled-scaled.ext" and leaving the single-scaled
+            // file behind as fresh orphan bloat — seen for real on this site
+            // (attachment 9312). Disable that one behavior for this call
+            // only; normal thumbnail/medium/large subsizes still generate.
+            $skipRescale = $this->isScaledFilename($relativePath);
+
+            if ($skipRescale) {
+                add_filter('big_image_size_threshold', '__return_false');
+            }
+
+            try {
+                $metadata = wp_generate_attachment_metadata($attachmentId, $full);
+            } finally {
+                if ($skipRescale) {
+                    remove_filter('big_image_size_threshold', '__return_false');
+                }
+            }
+
             wp_update_attachment_metadata($attachmentId, $metadata);
         } else {
             $attachmentId = $existingId;
@@ -305,19 +361,18 @@ final class MediaService
         $metadataFields = $this->applyMetadata($attachmentId, $data, $naming);
         $metadataCheck = MediaStoredVerifier::verifyMetadata($attachmentId, $metadataFields);
 
-        if ($metadataCheck['step'] !== null) {
-            if ($isNewAdoption) {
-                $this->detachFailedAdoption($attachmentId);
-            }
+        $verification = $stored['verification'];
 
-            return $this->uploadFailure(
-                ErrorCodes::MEDIA_VERIFY_FAILED,
-                $metadataCheck['step'],
-                array_merge($stored['verification'], ['failed_step' => $metadataCheck['step']]),
-            );
+        // Title/alt/caption/description are text formatting, not file
+        // integrity — WordPress core can legitimately rewrite them on save
+        // (e.g. wp_encode_emoji() converts emoji to HTML entities on legacy
+        // utf8 DB columns), which would otherwise fail this check for a file
+        // that decoded, hashed, and verified perfectly. Record the mismatch
+        // instead of discarding an already-verified-good attachment over it.
+        if ($metadataCheck['step'] !== null) {
+            $verification['metadata_mismatch'] = $metadataCheck['verification']['metadata_mismatch'] ?? null;
         }
 
-        $verification = $stored['verification'];
         $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
 
         if ($featuredSet['error'] !== null) {
@@ -335,6 +390,11 @@ final class MediaService
         $verification['featured_set'] = $featuredSet['set'];
         $verification['passed'] = true;
         MediaStoredVerifier::markVerified($attachmentId);
+
+        // Whether this call inserted a new attachment or resolved to an
+        // existing one, the orphan-scan cache should stop offering this
+        // path — it's mapped to an attachment either way.
+        (new MediaOrphanScanner())->forgetOrphanFile($relativePath);
 
         $media = $this->normalize($attachmentId);
         $media['verification'] = $verification;
@@ -628,12 +688,101 @@ final class MediaService
         return null;
     }
 
-    private function findExistingAttachmentByRelativePath(string $relativePath): ?int
+    /**
+     * Primary idempotency check: matches the path the file was originally
+     * adopted from, which stays stable even after WordPress renames
+     * `_wp_attached_file` to a `-scaled` variant during metadata generation.
+     */
+    private function findAttachmentBySourcePath(string $relativePath): ?int
+    {
+        $query = new WP_Query([
+            'post_type' => 'attachment',
+            'post_status' => 'inherit',
+            'posts_per_page' => 1,
+            'meta_query' => [
+                ['key' => self::SOURCE_PATH_META_KEY, 'value' => $relativePath],
+            ],
+        ]);
+
+        $post = $query->posts[0] ?? null;
+
+        return $post instanceof \WP_Post ? (int) $post->ID : null;
+    }
+
+    /**
+     * True when this path's own filename already ends in `-scaled` — i.e.
+     * it's already a big-image derivative, not an original.
+     */
+    private function isScaledFilename(string $relativePath): bool
+    {
+        return str_ends_with(pathinfo($relativePath, PATHINFO_FILENAME), '-scaled');
+    }
+
+    /**
+     * Deterministic `-scaled` filename WordPress's own big-image handling
+     * would use for this path (`wp-admin/includes/image.php`'s
+     * `WP_Image_Editor::generate_filename('scaled')`), which inserts the
+     * suffix with no uniqueness check — null when the path has no extension.
+     */
+    private function deriveScaledRelativePath(string $relativePath): ?string
+    {
+        $info = pathinfo($relativePath);
+        $extension = $info['extension'] ?? '';
+
+        if ($extension === '') {
+            return null;
+        }
+
+        $dir = $info['dirname'] !== '.' ? $info['dirname'] . '/' : '';
+
+        return $dir . $info['filename'] . '-scaled.' . $extension;
+    }
+
+    /**
+     * Retroactive fallback for images WordPress already scaled *before*
+     * {@see SOURCE_PATH_META_KEY} existed, so they never got that meta.
+     * WordPress itself records the pre-scale filename as `original_image`
+     * in `_wp_attachment_metadata` whenever it creates a `-scaled` variant
+     * (see wp-admin/includes/image.php, _wp_image_meta_replace_original());
+     * trust that WP-native breadcrumb rather than re-deriving the `-scaled`
+     * suffix ourselves, which could otherwise match an unrelated attachment
+     * that merely happens to share the same filename.
+     */
+    /** @phpstan-ignore-next-line return.unusedType The wordpress-stubs shape for wp_get_attachment_metadata() omits 'original_image', a real key WP core only adds for scaled attachments — PHPStan can't see the branch below ever matching. */
+    private function findAttachmentByScaledVariant(string $relativePath): ?int
+    {
+        $scaledRelative = $this->deriveScaledRelativePath($relativePath);
+
+        if ($scaledRelative === null) {
+            return null;
+        }
+
+        $candidateId = $this->findAttachmentByAttachedFile($scaledRelative);
+
+        if ($candidateId === null) {
+            return null;
+        }
+
+        $metadata = wp_get_attachment_metadata($candidateId);
+        $originalImage = is_array($metadata) ? ($metadata['original_image'] ?? null) : null;
+
+        return $originalImage === basename($relativePath) ? $candidateId : null;
+    }
+
+    /**
+     * Fallback for attachments adopted before {@see SOURCE_PATH_META_KEY}
+     * existed. Only matches when `_wp_attached_file` still equals the
+     * orphan-scan path verbatim, which WordPress's own big-image scaling
+     * can silently rewrite — see {@see adoptOrphan()}. When duplicates
+     * already share this value (the very bug this file fixes), picks the
+     * lowest ID so repeated adopts converge on the same attachment.
+     */
+    private function findAttachmentByAttachedFile(string $relativePath): ?int
     {
         global $wpdb;
 
         $id = $wpdb->get_var($wpdb->prepare(
-            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s LIMIT 1",
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s ORDER BY post_id ASC LIMIT 1",
             $relativePath,
         ));
 
