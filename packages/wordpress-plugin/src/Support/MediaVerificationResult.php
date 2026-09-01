@@ -29,6 +29,7 @@ final class MediaVerificationResult
             'public_url_status' => null,
             'featured_set' => false,
             'failed_step' => null,
+            'metadata_mismatch' => null,
         ];
 
         return array_merge($defaults, $overrides);

@@ -22,7 +22,7 @@ use RecursiveIteratorIterator;
  * result is cached via {@see runScan()} and read back via {@see cachedResult()}.
  *
  * @phpstan-type BrokenAttachment array{id: int, title: string, attached_file: string, edit_url: string}
- * @phpstan-type OrphanFile array{path: string, url: string|null}
+ * @phpstan-type OrphanFile array{path: string, url: string|null, size: int, mime: string|null, width: int|null, height: int|null}
  * @phpstan-type OrphanFiles array{items: list<OrphanFile>, truncated: bool}
  * @phpstan-type ScanResult array{scanned_at: string, broken_attachments: list<BrokenAttachment>, orphan_files: OrphanFiles}
  */
@@ -154,10 +154,14 @@ final class MediaOrphanScanner
                 continue;
             }
 
-            $orphans[] = [
-                'path' => $relative,
-                'url' => $baseurl !== null ? $baseurl . '/' . $relative : null,
-            ];
+            $orphans[] = array_merge(
+                [
+                    'path' => $relative,
+                    'url' => $baseurl !== null ? $baseurl . '/' . $relative : null,
+                    'size' => (int) $fileInfo->getSize(),
+                ],
+                $this->inspectFile($fileInfo->getPathname()),
+            );
 
             if (count($orphans) >= self::MAX_RESULTS) {
                 $truncated = true;
@@ -166,6 +170,32 @@ final class MediaOrphanScanner
         }
 
         return ['items' => $orphans, 'truncated' => $truncated];
+    }
+
+    /**
+     * Removes one path from the cached orphan-files list right after it's
+     * adopted, so a stale cache (scan runs at most daily) doesn't keep
+     * offering the same file for adoption before the next scan runs.
+     */
+    public function forgetOrphanFile(string $relativePath): void
+    {
+        $cached = $this->cachedResult();
+
+        if ($cached === null) {
+            return;
+        }
+
+        $items = array_values(array_filter(
+            $cached['orphan_files']['items'],
+            static fn(array $item): bool => $item['path'] !== $relativePath,
+        ));
+
+        if (count($items) === count($cached['orphan_files']['items'])) {
+            return;
+        }
+
+        $cached['orphan_files']['items'] = $items;
+        update_option(self::OPTION_KEY, $cached, false);
     }
 
     /**
@@ -188,6 +218,31 @@ final class MediaOrphanScanner
         }
 
         return wp_delete_file($full) !== false || ! file_exists($full);
+    }
+
+    /**
+     * Lightweight probe for the admin list table — `getimagesize()` only
+     * reads the file header, not the full file, so this stays cheap even
+     * for a few hundred orphans. Falls back to `mime_content_type()` for
+     * non-images (dimensions stay null).
+     *
+     * @return array{mime: string|null, width: int|null, height: int|null}
+     */
+    private function inspectFile(string $fullPath): array
+    {
+        $info = @getimagesize($fullPath);
+
+        if (is_array($info)) {
+            return [
+                'mime' => $info['mime'],
+                'width' => (int) $info[0],
+                'height' => (int) $info[1],
+            ];
+        }
+
+        $mime = function_exists('mime_content_type') ? @mime_content_type($fullPath) : false;
+
+        return ['mime' => is_string($mime) ? $mime : null, 'width' => null, 'height' => null];
     }
 
     /**

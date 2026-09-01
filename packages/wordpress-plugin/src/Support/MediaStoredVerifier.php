@@ -99,7 +99,10 @@ final class MediaStoredVerifier
 
             if ($actual !== $wanted) {
                 return [
-                    'verification' => MediaVerificationResult::build(['failed_step' => $step]),
+                    'verification' => MediaVerificationResult::build([
+                        'failed_step' => $step,
+                        'metadata_mismatch' => ['field' => $step, 'expected' => $wanted, 'actual' => $actual],
+                    ]),
                     'step' => $step,
                 ];
             }
