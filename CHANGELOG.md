@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Media orphan scanner**: new **JOOservices → Media** wp-admin page finds attachments whose file is missing on disk ("broken attachments") and files in the uploads directory with no attachment — original or generated size — referencing them ("orphan files"). Orphan files get a "View" link (opens the file on-site in a new tab) before the delete action. The scan runs daily via WP-Cron and on demand from wp-admin, and its result is cached (`wp_options`, not a live filesystem walk) so the new read-only `wordpress_get_media_orphans` MCP tool can return it cheaply — the walk itself stays out of the MCP/REST surface since it's too slow for a synchronous tool call. Delete actions remain wp-admin only (confirm-gated), not exposed to MCP.
+
 ### Fixed
 
 - **Media upload failure visibility (MCP server + WordPress plugin)**: `wordpress_upload_media` failures now return the WordPress plugin's `verification_step` / `verification` detail to the MCP client instead of a bare error code, and `wordpress_get_mcp_activity` (`mode: logs`) now includes each row's stored `metadata` (`error`, `error_step`). Previously both paths silently dropped this diagnostic detail even though the plugin's verified media pipeline already computed it.

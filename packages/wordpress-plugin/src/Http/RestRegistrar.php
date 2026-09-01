@@ -10,6 +10,7 @@ use JOOservices\WordPressMcp\Auth\ScopeChecker;
 use JOOservices\WordPressMcp\Models\Connection;
 use JOOservices\WordPressMcp\Services\CommentService;
 use JOOservices\WordPressMcp\Services\ContentService;
+use JOOservices\WordPressMcp\Services\MediaOrphanScanner;
 use JOOservices\WordPressMcp\Services\MediaService;
 use JOOservices\WordPressMcp\Services\NavigationService;
 use JOOservices\WordPressMcp\Services\PluginService;
@@ -121,6 +122,12 @@ final class RestRegistrar
                 'callback' => [$this, 'uploadMedia'],
                 'permission_callback' => [$this, 'authenticate'],
             ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/media/orphans', [
+            'methods' => 'GET',
+            'callback' => [$this, 'getMediaOrphans'],
+            'permission_callback' => [$this, 'authenticate'],
         ]);
 
         register_rest_route(self::NAMESPACE, '/media/(?P<id>\d+)', [
@@ -1180,6 +1187,39 @@ final class RestRegistrar
         );
 
         return new WP_REST_Response($result);
+    }
+
+    public function getMediaOrphans(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::canReadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new MediaOrphanScanner())->cachedResult();
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'media_orphans',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result ?? [
+            'scanned_at' => null,
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [], 'truncated' => false],
+        ]);
     }
 
     public function uploadMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
