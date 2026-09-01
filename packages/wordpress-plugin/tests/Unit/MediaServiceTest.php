@@ -26,6 +26,7 @@ final class MediaServiceTest extends TestCase
         $GLOBALS['wp_test_attachment_mimes'] = [];
         $GLOBALS['wp_test_attachment_metadata'] = [];
         $GLOBALS['wp_test_scale_rename'] = [];
+        $GLOBALS['wp_test_title_save_transform'] = [];
         $GLOBALS['wp_test_filters'] = [];
         $GLOBALS['wp_test_next_attachment_id'] = 9000;
 
@@ -360,5 +361,40 @@ final class MediaServiceTest extends TestCase
         self::assertNotNull($result['media']);
         self::assertSame(basename($relative), $result['media']['file_name']);
         self::assertStringNotContainsString('-scaled-scaled', $result['media']['file_name']);
+    }
+
+    #[Test]
+    public function it_succeeds_when_wordpress_rewrites_the_title_on_save_instead_of_deleting_the_attachment(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2018/07/photo-' . uniqid() . '.jpg';
+        $full = $basedir . '/' . $relative;
+        $this->writeMinimalPng($full);
+
+        $submittedTitle = 'Aimi Yoshikawa 😀';
+        $storedTitle = 'Aimi Yoshikawa &#x1f600;';
+
+        // Simulates wp_encode_emoji() rewriting an emoji to an HTML entity
+        // when WordPress persists post_title on a legacy utf8 DB column —
+        // this is a real WordPress core behavior, not something the plugin
+        // controls.
+        $GLOBALS['wp_test_title_save_transform'][$submittedTitle] = $storedTitle;
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative, 'title' => $submittedTitle]);
+
+        self::assertNull($result['error'], 'A cosmetic title mismatch must not fail the adoption.');
+        self::assertNotNull($result['media']);
+        self::assertCount(1, $GLOBALS['wp_test_posts'], 'The attachment must not be deleted over a title mismatch.');
+        self::assertSame(
+            ['field' => 'metadata.title', 'expected' => $submittedTitle, 'actual' => $storedTitle],
+            $result['verification']['metadata_mismatch'] ?? null,
+        );
     }
 }

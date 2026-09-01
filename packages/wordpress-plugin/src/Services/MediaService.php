@@ -361,19 +361,18 @@ final class MediaService
         $metadataFields = $this->applyMetadata($attachmentId, $data, $naming);
         $metadataCheck = MediaStoredVerifier::verifyMetadata($attachmentId, $metadataFields);
 
-        if ($metadataCheck['step'] !== null) {
-            if ($isNewAdoption) {
-                $this->detachFailedAdoption($attachmentId);
-            }
+        $verification = $stored['verification'];
 
-            return $this->uploadFailure(
-                ErrorCodes::MEDIA_VERIFY_FAILED,
-                $metadataCheck['step'],
-                array_merge($stored['verification'], ['failed_step' => $metadataCheck['step']]),
-            );
+        // Title/alt/caption/description are text formatting, not file
+        // integrity — WordPress core can legitimately rewrite them on save
+        // (e.g. wp_encode_emoji() converts emoji to HTML entities on legacy
+        // utf8 DB columns), which would otherwise fail this check for a file
+        // that decoded, hashed, and verified perfectly. Record the mismatch
+        // instead of discarding an already-verified-good attachment over it.
+        if ($metadataCheck['step'] !== null) {
+            $verification['metadata_mismatch'] = $metadataCheck['verification']['metadata_mismatch'] ?? null;
         }
 
-        $verification = $stored['verification'];
         $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
 
         if ($featuredSet['error'] !== null) {

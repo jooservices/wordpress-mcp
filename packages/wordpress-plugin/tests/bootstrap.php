@@ -601,8 +601,14 @@ if (! function_exists('wp_update_post')) {
         }
 
         if (isset($postarr['post_title'])) {
-            $post->post_title = (string) $postarr['post_title'];
-            $GLOBALS['wp_test_post_titles'][$id] = $post->post_title;
+            $submitted = (string) $postarr['post_title'];
+            // Simulates WordPress core rewriting post_title on save (e.g.
+            // wp_encode_emoji() on a legacy utf8 DB column) — tests set
+            // $GLOBALS['wp_test_title_save_transform'][$submitted] to the
+            // value WP would actually persist.
+            $stored = $GLOBALS['wp_test_title_save_transform'][$submitted] ?? $submitted;
+            $post->post_title = $stored;
+            $GLOBALS['wp_test_post_titles'][$id] = $stored;
         }
 
         if (isset($postarr['post_excerpt'])) {
