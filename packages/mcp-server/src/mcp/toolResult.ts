@@ -18,8 +18,14 @@ export function executionError(error: unknown): ToolResult {
           ? error.message
           : "Unknown error";
 
+  const detail =
+    error instanceof WordPressApiError && error.data
+      ? Object.fromEntries(Object.entries(error.data).filter(([key]) => key !== "status"))
+      : undefined;
+
   return {
     content: [{ type: "text", text: message }],
+    ...(detail && Object.keys(detail).length > 0 ? { structuredContent: detail } : {}),
     isError: true,
   };
 }
