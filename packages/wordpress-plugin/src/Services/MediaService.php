@@ -319,7 +319,29 @@ final class MediaService
 
             $attachmentId = (int) $inserted;
             update_post_meta($attachmentId, self::SOURCE_PATH_META_KEY, $relativePath);
-            $metadata = wp_generate_attachment_metadata($attachmentId, $full);
+
+            // The file being adopted is itself already a `-scaled` derivative
+            // (e.g. a genuine original was scaled once, then that original
+            // was later orphaned and only the derivative remains). Without
+            // this, WordPress's own big-image handling can scale it *again*,
+            // producing "-scaled-scaled.ext" and leaving the single-scaled
+            // file behind as fresh orphan bloat — seen for real on this site
+            // (attachment 9312). Disable that one behavior for this call
+            // only; normal thumbnail/medium/large subsizes still generate.
+            $skipRescale = $this->isScaledFilename($relativePath);
+
+            if ($skipRescale) {
+                add_filter('big_image_size_threshold', '__return_false');
+            }
+
+            try {
+                $metadata = wp_generate_attachment_metadata($attachmentId, $full);
+            } finally {
+                if ($skipRescale) {
+                    remove_filter('big_image_size_threshold', '__return_false');
+                }
+            }
+
             wp_update_attachment_metadata($attachmentId, $metadata);
         } else {
             $attachmentId = $existingId;
@@ -686,6 +708,15 @@ final class MediaService
         $post = $query->posts[0] ?? null;
 
         return $post instanceof \WP_Post ? (int) $post->ID : null;
+    }
+
+    /**
+     * True when this path's own filename already ends in `-scaled` — i.e.
+     * it's already a big-image derivative, not an original.
+     */
+    private function isScaledFilename(string $relativePath): bool
+    {
+        return str_ends_with(pathinfo($relativePath, PATHINFO_FILENAME), '-scaled');
     }
 
     /**

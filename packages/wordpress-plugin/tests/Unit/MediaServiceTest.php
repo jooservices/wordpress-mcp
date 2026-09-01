@@ -331,4 +331,34 @@ final class MediaServiceTest extends TestCase
         self::assertNull($result['media']);
         self::assertCount(0, $GLOBALS['wp_test_posts']);
     }
+
+    #[Test]
+    public function it_does_not_rescale_an_orphan_whose_own_filename_already_ends_in_scaled(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/09/photo-' . uniqid() . '-scaled.webp';
+        $full = $basedir . '/' . $relative;
+        $this->writeMinimalPng($full);
+
+        $doubleScaledFull = $basedir . '/2025/09/photo-' . uniqid() . '-scaled-scaled.webp';
+
+        // If the big-image threshold filter weren't disabled for this call,
+        // WordPress would rescale straight into this double-suffixed path
+        // (this happened for real on this site — attachment 9312).
+        $GLOBALS['wp_test_scale_rename'][$full] = $doubleScaledFull;
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertNull($result['error']);
+        self::assertNotNull($result['media']);
+        self::assertSame(basename($relative), $result['media']['file_name']);
+        self::assertStringNotContainsString('-scaled-scaled', $result['media']['file_name']);
+    }
 }

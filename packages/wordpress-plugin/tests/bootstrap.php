@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+if (! function_exists('__return_false')) {
+    function __return_false(): bool
+    {
+        return false;
+    }
+}
+
 if (! function_exists('sanitize_key')) {
     function sanitize_key(string $key): string
     {
@@ -170,6 +177,13 @@ if (! function_exists('apply_filters')) {
     function add_filter(string $tag, callable $callback): void
     {
         $GLOBALS['wp_test_filters'][$tag] = $callback;
+    }
+
+    function remove_filter(string $tag, callable $callback): bool
+    {
+        unset($GLOBALS['wp_test_filters'][$tag]);
+
+        return true;
     }
 
     function apply_filters(string $tag, mixed $value, mixed ...$args): mixed
@@ -633,7 +647,8 @@ if (! function_exists('wp_generate_attachment_metadata')) {
      */
     function wp_generate_attachment_metadata(int $attachmentId, string $file): array
     {
-        $renameTo = $GLOBALS['wp_test_scale_rename'][$file] ?? null;
+        $thresholdEnabled = apply_filters('big_image_size_threshold', 2560) !== false;
+        $renameTo = $thresholdEnabled ? ($GLOBALS['wp_test_scale_rename'][$file] ?? null) : null;
 
         if (is_string($renameTo) && $renameTo !== '') {
             $uploadDir = wp_upload_dir();

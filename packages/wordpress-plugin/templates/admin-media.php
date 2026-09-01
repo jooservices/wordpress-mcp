@@ -67,6 +67,7 @@ $scanUrl = add_query_arg(['page' => 'jooservices-media', 'scan' => '1'], admin_u
 
         <h2 style="margin-top:2em;">Orphan files (<?php echo esc_html((string) count($orphanFiles['items'])); ?><?php echo $orphanFiles['truncated'] ? '+' : ''; ?>)</h2>
         <p>File exists in the uploads directory, but no attachment (original or generated size) references it. Review before deleting — some files may be managed by other plugins or themes.</p>
+        <p>Rows marked <strong>scaled derivative</strong> already have a WordPress-generated <code>-scaled</code> suffix — they're the output of a previous big-image resize, not a standalone original. Adopting one of these will not resize it again.</p>
         <?php if ($orphanFiles['truncated']) : ?>
             <p><strong>Scan capped before finishing.</strong> Re-run after clearing some results to see more.</p>
         <?php endif; ?>
@@ -79,8 +80,15 @@ $scanUrl = add_query_arg(['page' => 'jooservices-media', 'scan' => '1'], admin_u
             </thead>
             <tbody>
                 <?php foreach ($orphanFiles['items'] as $item) : ?>
+                    <?php $isScaled = (bool) preg_match('/-scaled\.[^.\/]+$/', $item['path']); ?>
                     <tr>
-                        <td><code><?php echo esc_html($item['path']); ?></code></td>
+                        <td>
+                            <code><?php echo esc_html($item['path']); ?></code>
+                            <?php if ($isScaled) : ?>
+                                <span class="dashicons dashicons-image-crop" title="Scaled derivative — output of a previous big-image resize, not a standalone original."></span>
+                                <em>scaled derivative</em>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <?php if ($item['url'] !== null) : ?>
                                 <a href="<?php echo esc_url($item['url']); ?>" class="button" target="_blank" rel="noopener noreferrer">View</a>
