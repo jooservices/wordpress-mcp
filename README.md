@@ -3,7 +3,7 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.4.2-blue.svg)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/version-1.4.4-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
@@ -12,11 +12,11 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.4.0
+## About v1.4.4
 
 | | |
 | --- | --- |
-| Status | **v1.4.0 — post templates, verified media, consolidated tools** |
+| Status | **v1.4.4 — media orphan recovery (scan, broken-reference finder, no-reupload adoption)** |
 | Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
 | Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
@@ -30,11 +30,12 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 - Rate limiting and a full request audit log (reads, writes, and denials), with retention and CSV export
 - Default create = draft; publish gated by scope
 - Upload hardening: content sniffing + executable-extension blocklist
+- **JOOservices → Media** wp-admin page: daily-cached scan for broken attachments (missing file) and orphan files (no attachment record), with a confirm-gated delete action
 
 **MCP server**
 
 - One MCP server → one or many WordPress sites (`WORDPRESS_SITES`)
-- 42 purpose-built tools (content, post templates, media, plugins/themes, users, settings, health, maintenance, revisions, redirects, SEO, observability)
+- 45 purpose-built tools (content, post templates, media, plugins/themes, users, settings, health, maintenance, revisions, redirects, SEO, observability)
 - WordPress entities browsable as MCP resources (`wordpress://sites|content|comments|media|terms`)
 - Safety gates: publish transitions, deletion, robots.txt updates, and SEO metadata writes require `confirm: true`; preview diffs with `wordpress_update_content` + `preview: true`
 - Semantic search: filter by author name, category/tag slug, and custom field
@@ -42,6 +43,7 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 - On-site SEO tools: robots.txt, per-post audit (title/description/noindex/headings/alt text/internal links), and metadata fixes — auto-detects Yoast/Rank Math, no external API calls
 - Request observability: `X-Request-Id` correlation with the WordPress audit log, `wordpress_get_mcp_activity` tool, log retention
 - `wordpress_get_site` reports site info, PHP upload limits, and core update status
+- Media orphan recovery: cached daily scan (`wordpress_get_media_orphans`), broken inline `wp-image-{ID}` reference detection (`wordpress_find_broken_media_references`), and no-reupload attachment adoption (`wordpress_adopt_orphan_media`)
 - Streamable HTTP transport at `/mcp`
 - OAuth 2.1 Mixed auth (default) or static bearer for dev
 - Protocol DTO whitelists (no internal field leakage to MCP clients)
