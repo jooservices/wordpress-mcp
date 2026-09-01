@@ -8,6 +8,7 @@ use JOOservices\WordPressMcp\Audit\AuditLogger;
 use JOOservices\WordPressMcp\Auth\ConnectionAuthenticator;
 use JOOservices\WordPressMcp\Auth\ScopeChecker;
 use JOOservices\WordPressMcp\Models\Connection;
+use JOOservices\WordPressMcp\Services\BrokenMediaReferenceScanner;
 use JOOservices\WordPressMcp\Services\CommentService;
 use JOOservices\WordPressMcp\Services\ContentService;
 use JOOservices\WordPressMcp\Services\MediaOrphanScanner;
@@ -127,6 +128,12 @@ final class RestRegistrar
         register_rest_route(self::NAMESPACE, '/media/orphans', [
             'methods' => 'GET',
             'callback' => [$this, 'getMediaOrphans'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/media/broken-references', [
+            'methods' => 'GET',
+            'callback' => [$this, 'getBrokenMediaReferences'],
             'permission_callback' => [$this, 'authenticate'],
         ]);
 
@@ -1220,6 +1227,36 @@ final class RestRegistrar
             'broken_attachments' => [],
             'orphan_files' => ['items' => [], 'truncated' => false],
         ]);
+    }
+
+    public function getBrokenMediaReferences(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::canReadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.read')) {
+            return RequestContext::deny();
+        }
+
+        $postId = $request->get_param('post_id');
+        $result = (new BrokenMediaReferenceScanner())->scan($postId !== null ? (int) $postId : null);
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'media_broken_references',
+            $postId !== null ? (string) $postId : null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
     }
 
     public function uploadMedia(WP_REST_Request $request): WP_REST_Response|WP_Error

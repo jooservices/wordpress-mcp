@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Media orphan scanner**: new **JOOservices → Media** wp-admin page finds attachments whose file is missing on disk ("broken attachments") and files in the uploads directory with no attachment — original or generated size — referencing them ("orphan files"). Orphan files get a "View" link (opens the file on-site in a new tab) before the delete action. The scan runs daily via WP-Cron and on demand from wp-admin, and its result is cached (`wp_options`, not a live filesystem walk) so the new read-only `wordpress_get_media_orphans` MCP tool can return it cheaply — the walk itself stays out of the MCP/REST surface since it's too slow for a synchronous tool call. Delete actions remain wp-admin only (confirm-gated), not exposed to MCP.
+- **Broken inline media reference finder**: new read-only `wordpress_find_broken_media_references` MCP tool scans post/page content for `wp-image-{ID}` references where `{ID}` no longer resolves to a real attachment, and matches each one against the cached orphan-file scan by the exact path parsed from the broken tag's own `src` — never a filename guess. A match means the source file still exists and can be re-uploaded and relinked (`wordpress_upload_media` + `wordpress_update_content` with `confirm: true`); no match means the file is gone and can't be recovered automatically.
 
 ### Fixed
 
