@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-09-01
+
 ### Added
 
 - **Media orphan scanner**: new **JOOservices → Media** wp-admin page finds attachments whose file is missing on disk ("broken attachments") and files in the uploads directory with no attachment — original or generated size — referencing them ("orphan files"). Orphan files get a "View" link (opens the file on-site in a new tab) before the delete action. The scan runs daily via WP-Cron and on demand from wp-admin, and its result is cached (`wp_options`, not a live filesystem walk) so the new read-only `wordpress_get_media_orphans` MCP tool can return it cheaply — the walk itself stays out of the MCP/REST surface since it's too slow for a synchronous tool call. Delete actions remain wp-admin only (confirm-gated), not exposed to MCP.
@@ -201,7 +203,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...develop
+[1.4.4]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.3...v1.4.4
+[1.4.3]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...v1.4.3
 [1.4.2]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.1...v1.4.2
 [1.4.1]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.3.0...v1.4.0

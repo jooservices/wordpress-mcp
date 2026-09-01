@@ -16,7 +16,7 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
-define('JOOSERVICES_WORDPRESS_MCP_VERSION', '1.4.3');
+define('JOOSERVICES_WORDPRESS_MCP_VERSION', '1.4.4');
 define('JOOSERVICES_WORDPRESS_MCP_FILE', __FILE__);
 define('JOOSERVICES_WORDPRESS_MCP_PATH', plugin_dir_path(__FILE__));
 define('JOOSERVICES_WORDPRESS_MCP_URL', plugin_dir_url(__FILE__));
