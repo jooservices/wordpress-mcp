@@ -9,6 +9,7 @@ use JOOservices\WordPressMcp\Support\MediaFileNamer;
 use JOOservices\WordPressMcp\Support\MediaImageInspector;
 use JOOservices\WordPressMcp\Support\MediaStoredVerifier;
 use JOOservices\WordPressMcp\Support\MediaVerificationResult;
+use JOOservices\WordPressMcp\Support\UploadDirectory;
 use WP_Query;
 
 final class MediaService
@@ -189,6 +190,155 @@ final class MediaService
         $media['slug_base'] = $naming['slug_base'];
         $media['image_type'] = $naming['image_type'];
         $media['verification'] = $verification;
+
+        return [
+            'media' => $media,
+            'verification' => $verification,
+            'error' => null,
+            'error_step' => null,
+        ];
+    }
+
+    /**
+     * Registers an existing orphan file (found by {@see MediaOrphanScanner})
+     * as a real attachment without copying or re-uploading its bytes: WordPress
+     * points the new attachment straight at the file already on disk, so no
+     * duplicate file is ever created. Matches `path` or `url` against the
+     * cached orphan scan first — the filesystem path we actually touch always
+     * comes from that trusted scan result, never straight from caller input.
+     *
+     * Idempotent: if the file was already adopted (e.g. two broken posts
+     * pointing at the same orphan), returns the existing attachment instead
+     * of inserting a second record for the same file.
+     *
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    public function adoptOrphan(array $data): array
+    {
+        $path = isset($data['path']) ? ltrim((string) $data['path'], '/') : '';
+        $url = isset($data['url']) ? (string) $data['url'] : '';
+
+        if ($path === '' && $url === '') {
+            return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.input');
+        }
+
+        $match = $this->resolveOrphanMatch($path, $url);
+
+        if ($match === null) {
+            return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.not_orphan');
+        }
+
+        $relativePath = $match['path'];
+        $basedir = UploadDirectory::basedir();
+        $full = $basedir !== null ? realpath($basedir . '/' . $relativePath) : false;
+
+        if ($basedir === null || $full === false || ! str_starts_with($full, $basedir . '/') || ! is_file($full)) {
+            return $this->uploadFailure(ErrorCodes::MEDIA_NOT_FOUND, 'pre_validate.missing_file');
+        }
+
+        if (! $this->hasSafeExtension(basename($relativePath))) {
+            return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.extension');
+        }
+
+        $preCheck = MediaImageInspector::inspectFile($full);
+
+        if (! $preCheck['ok']) {
+            return $this->uploadFailure(
+                ErrorCodes::MEDIA_VERIFY_FAILED,
+                (string) $preCheck['step'],
+                MediaVerificationResult::build([
+                    'source_bytes' => $preCheck['bytes'],
+                    'sha256' => $preCheck['sha256'],
+                    'mime_detected' => $preCheck['mime'],
+                    'width' => $preCheck['width'],
+                    'height' => $preCheck['height'],
+                    'decode_ok' => false,
+                    'failed_step' => $preCheck['step'],
+                ]),
+            );
+        }
+
+        $fallbackTitle = sanitize_file_name((string) pathinfo(basename($relativePath), PATHINFO_FILENAME));
+        $existingId = $this->findExistingAttachmentByRelativePath($relativePath);
+        $isNewAdoption = $existingId === null;
+        $title = trim(sanitize_text_field((string) ($data['title'] ?? '')));
+
+        if ($title === '') {
+            $title = $existingId !== null ? (get_the_title($existingId) ?: $fallbackTitle) : $fallbackTitle;
+        }
+
+        if ($isNewAdoption) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+
+            $inserted = wp_insert_attachment([
+                'post_mime_type' => $preCheck['mime'],
+                'post_title' => $title,
+                'post_content' => '',
+                'post_status' => 'inherit',
+            ], $full);
+
+            if (is_wp_error($inserted) || (int) $inserted <= 0) {
+                return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'adopt.insert_failed');
+            }
+
+            $attachmentId = (int) $inserted;
+            $metadata = wp_generate_attachment_metadata($attachmentId, $full);
+            wp_update_attachment_metadata($attachmentId, $metadata);
+        } else {
+            $attachmentId = $existingId;
+        }
+
+        $stored = MediaStoredVerifier::verifyAttachment($attachmentId);
+
+        if ($stored['step'] !== null) {
+            if ($isNewAdoption) {
+                $this->detachFailedAdoption($attachmentId);
+            }
+
+            return $this->uploadFailure(ErrorCodes::MEDIA_VERIFY_FAILED, $stored['step'], $stored['verification']);
+        }
+
+        $naming = ['file_name' => basename($relativePath), 'slug_base' => '', 'image_type' => null, 'attachment_title' => $title];
+        $metadataFields = $this->applyMetadata($attachmentId, $data, $naming);
+        $metadataCheck = MediaStoredVerifier::verifyMetadata($attachmentId, $metadataFields);
+
+        if ($metadataCheck['step'] !== null) {
+            if ($isNewAdoption) {
+                $this->detachFailedAdoption($attachmentId);
+            }
+
+            return $this->uploadFailure(
+                ErrorCodes::MEDIA_VERIFY_FAILED,
+                $metadataCheck['step'],
+                array_merge($stored['verification'], ['failed_step' => $metadataCheck['step']]),
+            );
+        }
+
+        $verification = $stored['verification'];
+        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
+
+        if ($featuredSet['error'] !== null) {
+            if ($isNewAdoption) {
+                $this->detachFailedAdoption($attachmentId);
+            }
+
+            return $this->uploadFailure(
+                $featuredSet['error'],
+                $featuredSet['step'] ?? 'featured.set_failed',
+                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
+            );
+        }
+
+        $verification['featured_set'] = $featuredSet['set'];
+        $verification['passed'] = true;
+        MediaStoredVerifier::markVerified($attachmentId);
+
+        $media = $this->normalize($attachmentId);
+        $media['verification'] = $verification;
+        $media['adopted_from'] = $relativePath;
 
         return [
             'media' => $media,
@@ -455,6 +605,53 @@ final class MediaService
     private function cleanupAttachment(int $attachmentId): void
     {
         wp_delete_attachment($attachmentId, true);
+    }
+
+    /**
+     * @return array{path: string, url: string|null}|null
+     */
+    private function resolveOrphanMatch(string $path, string $url): ?array
+    {
+        $cached = (new MediaOrphanScanner())->cachedResult();
+        $items = $cached['orphan_files']['items'] ?? [];
+
+        foreach ($items as $item) {
+            if ($path !== '' && $item['path'] === $path) {
+                return $item;
+            }
+
+            if ($url !== '' && ($item['url'] ?? null) === $url) {
+                return $item;
+            }
+        }
+
+        return null;
+    }
+
+    private function findExistingAttachmentByRelativePath(string $relativePath): ?int
+    {
+        global $wpdb;
+
+        $id = $wpdb->get_var($wpdb->prepare(
+            "SELECT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_wp_attached_file' AND meta_value = %s LIMIT 1",
+            $relativePath,
+        ));
+
+        return $id !== null && (int) $id > 0 ? (int) $id : null;
+    }
+
+    /**
+     * Removes an attachment post created during a failed adopt without touching
+     * its file. wp_delete_attachment()/wp_delete_post() on an attachment always
+     * deletes the underlying file too (WordPress core hooks wp_delete_attachment
+     * onto delete_post), which would destroy the very orphan file adoptOrphan()
+     * exists to preserve — unhooking it for this one call keeps the file intact.
+     */
+    private function detachFailedAdoption(int $attachmentId): void
+    {
+        remove_action('delete_post', 'wp_delete_attachment');
+        wp_delete_post($attachmentId, true);
+        add_action('delete_post', 'wp_delete_attachment');
     }
 
     /**

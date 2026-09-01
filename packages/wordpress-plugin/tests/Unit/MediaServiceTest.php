@@ -16,6 +16,7 @@ final class MediaServiceTest extends TestCase
     protected function setUp(): void
     {
         $GLOBALS['wp_test_max_upload_size'] = 32;
+        $GLOBALS['wp_test_options'] = [];
     }
 
     #[Test]
@@ -59,5 +60,75 @@ final class MediaServiceTest extends TestCase
 
         self::assertSame(ErrorCodes::MEDIA_VERIFY_FAILED, $result['error']);
         self::assertSame('pre_validate.decode', $result['error_step']);
+    }
+
+    #[Test]
+    public function it_rejects_adopt_without_path_or_url(): void
+    {
+        $service = new MediaService();
+        $result = $service->adoptOrphan([]);
+
+        self::assertSame(ErrorCodes::INVALID_ARGUMENT, $result['error']);
+        self::assertSame('pre_validate.input', $result['error_step']);
+        self::assertNull($result['media']);
+    }
+
+    #[Test]
+    public function it_rejects_adopt_for_a_path_the_orphan_scan_never_reported(): void
+    {
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => '2025/01/known.png', 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => '2025/01/never-scanned.png']);
+
+        self::assertSame(ErrorCodes::INVALID_ARGUMENT, $result['error']);
+        self::assertSame('pre_validate.not_orphan', $result['error_step']);
+        self::assertNull($result['media']);
+    }
+
+    #[Test]
+    public function it_rejects_adopt_when_the_matched_orphan_file_is_missing_on_disk(): void
+    {
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => '2025/01/gone.png', 'url' => 'https://example.test/wp-content/uploads/2025/01/gone.png']], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['url' => 'https://example.test/wp-content/uploads/2025/01/gone.png']);
+
+        self::assertSame(ErrorCodes::MEDIA_NOT_FOUND, $result['error']);
+        self::assertSame('pre_validate.missing_file', $result['error_step']);
+        self::assertNull($result['media']);
+    }
+
+    #[Test]
+    public function it_rejects_adopt_of_a_matched_orphan_whose_bytes_are_not_a_valid_image(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/01/corrupted-' . uniqid() . '.png';
+        $full = $basedir . '/' . $relative;
+        mkdir(dirname($full), 0777, true);
+        file_put_contents($full, 'not-a-png');
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative]);
+
+        unlink($full);
+
+        self::assertSame(ErrorCodes::MEDIA_VERIFY_FAILED, $result['error']);
+        self::assertContains($result['error_step'], ['post_validate.mime', 'post_validate.mime_not_allowed']);
+        self::assertNull($result['media']);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOOservices\WordPressMcp\Services;
 
 use JOOservices\WordPressMcp\Support\ContentTypes;
+use JOOservices\WordPressMcp\Support\UploadDirectory;
 use WP_Post;
 
 /**
@@ -41,7 +42,7 @@ final class BrokenMediaReferenceScanner
      */
     public function scan(?int $postId = null): array
     {
-        $baseurl = $this->baseurl();
+        $baseurl = UploadDirectory::baseurl();
         $known = $this->orphanFileUrls();
 
         $items = [];
@@ -169,16 +170,5 @@ final class BrokenMediaReferenceScanner
         }
 
         return $map;
-    }
-
-    private function baseurl(): ?string
-    {
-        $uploadDir = wp_upload_dir();
-
-        if (! is_array($uploadDir) || ! empty($uploadDir['error']) || empty($uploadDir['baseurl'])) {
-            return null;
-        }
-
-        return rtrim((string) $uploadDir['baseurl'], '/');
     }
 }
