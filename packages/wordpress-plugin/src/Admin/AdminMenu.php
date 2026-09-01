@@ -125,9 +125,15 @@ final class AdminMenu
         $this->handleMediaPostActions();
 
         $scanner = new MediaOrphanScanner();
-        $scanned = isset($_GET['scan']) && $_GET['scan'] === '1';
-        $brokenAttachments = $scanned ? $scanner->findBrokenAttachments() : [];
-        $orphanFiles = $scanned ? $scanner->findOrphanFiles() : ['items' => [], 'truncated' => false];
+
+        if (isset($_GET['scan']) && $_GET['scan'] === '1') {
+            $scanner->runScan();
+        }
+
+        $result = $scanner->cachedResult();
+        $scannedAt = $result['scanned_at'] ?? null;
+        $brokenAttachments = $result['broken_attachments'] ?? [];
+        $orphanFiles = $result['orphan_files'] ?? ['items' => [], 'truncated' => false];
 
         include JOOSERVICES_WORDPRESS_MCP_PATH . 'templates/admin-media.php';
     }

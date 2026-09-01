@@ -1120,6 +1120,27 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_get_media_orphans",
+      title: "Get WordPress media orphan scan results",
+      description:
+        "Returns the last cached result of the wp-admin media orphan scan (JOOservices → Media): attachments whose file is missing on disk, and files on disk with no attachment referencing them. Read-only, does not run a fresh scan — that runs daily via WP-Cron or on demand from wp-admin, since a full filesystem walk is too slow for a tool call. scanned_at is null if the site has never scanned.",
+      inputSchema: z.object({ site: siteSchema }),
+      access: "read",
+    },
+    async ({ client, siteId }: ToolContext<{ site?: string }>) => {
+      const result = await client.get("/media/orphans");
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: withSiteMeta(siteId, result as Record<string, unknown>),
+      };
+    },
+  );
+
   const uploadMediaSchema = z.object({
     site: siteSchema,
     title: z.string().min(1).describe("Human-readable image subject. With image_type, WordPress builds the stored filename as slug(title)-slug(image_type).ext."),

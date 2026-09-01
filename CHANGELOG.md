@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Media orphan scanner (WordPress plugin, wp-admin only)**: new **JOOservices → Media** admin page finds attachments whose file is missing on disk ("broken attachments") and files in the uploads directory with no attachment (original or generated size) referencing them ("orphan files"). Admin-triggered only, not exposed to MCP clients — a full filesystem walk is too slow for a synchronous tool call. Each result has a confirm-gated delete action.
+- **Media orphan scanner**: new **JOOservices → Media** wp-admin page finds attachments whose file is missing on disk ("broken attachments") and files in the uploads directory with no attachment — original or generated size — referencing them ("orphan files"). Orphan files get a "View" link (opens the file on-site in a new tab) before the delete action. The scan runs daily via WP-Cron and on demand from wp-admin, and its result is cached (`wp_options`, not a live filesystem walk) so the new read-only `wordpress_get_media_orphans` MCP tool can return it cheaply — the walk itself stays out of the MCP/REST surface since it's too slow for a synchronous tool call. Delete actions remain wp-admin only (confirm-gated), not exposed to MCP.
 
 ### Fixed
 

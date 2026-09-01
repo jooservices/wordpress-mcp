@@ -16,18 +16,54 @@ use RecursiveIteratorIterator;
  * - "Orphan files": a file exists on disk but no attachment (original or
  *   registered subsize) references it.
  *
- * Both scans are read-only and admin-triggered (wp-admin, not the MCP REST
- * surface) — a full filesystem walk is too slow/unbounded for a synchronous
- * tool call, so results are capped rather than paginated.
+ * The filesystem walk is too slow/unbounded for a synchronous MCP tool call,
+ * so it only ever runs from wp-admin (button click) or WP-Cron (daily); the
+ * result is cached via {@see runScan()} and read back via {@see cachedResult()}.
+ *
+ * @phpstan-type BrokenAttachment array{id: int, title: string, attached_file: string, edit_url: string}
+ * @phpstan-type OrphanFile array{path: string, url: string|null}
+ * @phpstan-type OrphanFiles array{items: list<OrphanFile>, truncated: bool}
+ * @phpstan-type ScanResult array{scanned_at: string, broken_attachments: list<BrokenAttachment>, orphan_files: OrphanFiles}
  */
 final class MediaOrphanScanner
 {
+    private const OPTION_KEY = 'jooservices_mcp_media_orphans';
+
     private const MAX_RESULTS = 500;
 
     private const MAX_FILES_SCANNED = 20000;
 
     /**
-     * @return list<array{id: int, title: string, attached_file: string, edit_url: string}>
+     * Runs both scans and persists the result so it can be read back cheaply
+     * (wp-admin page load, MCP tool call) without repeating the filesystem walk.
+     *
+     * @return ScanResult
+     */
+    public function runScan(): array
+    {
+        $result = [
+            'scanned_at' => gmdate('c'),
+            'broken_attachments' => $this->findBrokenAttachments(),
+            'orphan_files' => $this->findOrphanFiles(),
+        ];
+
+        update_option(self::OPTION_KEY, $result, false);
+
+        return $result;
+    }
+
+    /**
+     * @return ScanResult|null
+     */
+    public function cachedResult(): ?array
+    {
+        $stored = get_option(self::OPTION_KEY, null);
+
+        return is_array($stored) ? $stored : null;
+    }
+
+    /**
+     * @return list<BrokenAttachment>
      */
     public function findBrokenAttachments(): array
     {
@@ -74,7 +110,7 @@ final class MediaOrphanScanner
     }
 
     /**
-     * @return array{items: list<string>, truncated: bool}
+     * @return OrphanFiles
      */
     public function findOrphanFiles(): array
     {
@@ -84,6 +120,7 @@ final class MediaOrphanScanner
             return ['items' => [], 'truncated' => false];
         }
 
+        $baseurl = $this->baseurl();
         $known = $this->knownRelativePaths();
         $orphans = [];
         $truncated = false;
@@ -116,7 +153,10 @@ final class MediaOrphanScanner
                 continue;
             }
 
-            $orphans[] = $relative;
+            $orphans[] = [
+                'path' => $relative,
+                'url' => $baseurl !== null ? $baseurl . '/' . $relative : null,
+            ];
 
             if (count($orphans) >= self::MAX_RESULTS) {
                 $truncated = true;
@@ -203,5 +243,16 @@ final class MediaOrphanScanner
         }
 
         return rtrim((string) $uploadDir['basedir'], '/');
+    }
+
+    private function baseurl(): ?string
+    {
+        $uploadDir = wp_upload_dir();
+
+        if (! is_array($uploadDir) || ! empty($uploadDir['error']) || empty($uploadDir['baseurl'])) {
+            return null;
+        }
+
+        return rtrim((string) $uploadDir['baseurl'], '/');
     }
 }

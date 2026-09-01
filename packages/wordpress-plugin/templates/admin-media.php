@@ -7,22 +7,30 @@ if (! defined('ABSPATH')) {
 }
 
 /**
- * @var bool $scanned
+ * @var string|null $scannedAt
  * @var list<array{id: int, title: string, attached_file: string, edit_url: string}> $brokenAttachments
- * @var array{items: list<string>, truncated: bool} $orphanFiles
+ * @var array{items: list<array{path: string, url: string|null}>, truncated: bool} $orphanFiles
  */
 
 $scanUrl = add_query_arg(['page' => 'jooservices-media', 'scan' => '1'], admin_url('admin.php'));
 ?>
 <div class="wrap">
     <h1>Media</h1>
-    <p>Finds two kinds of inconsistency between the Media Library and the uploads directory on disk. This is a manual, admin-triggered scan — it is not exposed to MCP clients, since a full filesystem walk is too slow for a single tool call.</p>
+    <p>Finds two kinds of inconsistency between the Media Library and the uploads directory on disk. Results are cached — a background job re-scans daily, and this page reads that cache instead of re-walking the filesystem on every view. Not exposed to MCP clients directly for the same reason: a full filesystem walk is too slow for a single tool call.</p>
 
     <p>
-        <a href="<?php echo esc_url($scanUrl); ?>" class="button button-primary">Run scan</a>
+        <?php if ($scannedAt !== null) : ?>
+            Last scanned: <strong><?php echo esc_html($scannedAt); ?></strong> (UTC)
+        <?php else : ?>
+            Never scanned yet.
+        <?php endif; ?>
     </p>
 
-    <?php if ($scanned) : ?>
+    <p>
+        <a href="<?php echo esc_url($scanUrl); ?>" class="button button-primary">Run scan now</a>
+    </p>
+
+    <?php if ($scannedAt !== null) : ?>
         <h2>Broken attachments (<?php echo esc_html((string) count($brokenAttachments)); ?>)</h2>
         <p>Attachment exists in the Media Library, but its file is missing on disk.</p>
         <table class="widefat striped">
@@ -70,13 +78,16 @@ $scanUrl = add_query_arg(['page' => 'jooservices-media', 'scan' => '1'], admin_u
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($orphanFiles['items'] as $path) : ?>
+                <?php foreach ($orphanFiles['items'] as $item) : ?>
                     <tr>
-                        <td><code><?php echo esc_html($path); ?></code></td>
+                        <td><code><?php echo esc_html($item['path']); ?></code></td>
                         <td>
+                            <?php if ($item['url'] !== null) : ?>
+                                <a href="<?php echo esc_url($item['url']); ?>" class="button" target="_blank" rel="noopener noreferrer">View</a>
+                            <?php endif; ?>
                             <form method="post" style="display:inline;">
                                 <?php wp_nonce_field('jooservices_media_orphans', 'jooservices_media_nonce'); ?>
-                                <input type="hidden" name="delete_orphan_file" value="<?php echo esc_attr($path); ?>">
+                                <input type="hidden" name="delete_orphan_file" value="<?php echo esc_attr($item['path']); ?>">
                                 <button type="submit" class="button button-link-delete" onclick="return confirm('Permanently delete this file from disk? This cannot be undone.');">Delete file</button>
                             </form>
                         </td>
