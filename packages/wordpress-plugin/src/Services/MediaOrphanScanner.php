@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace JOOservices\WordPressMcp\Services;
 
 use FilesystemIterator;
+use JOOservices\WordPressMcp\Support\UploadDirectory;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 
@@ -69,7 +70,7 @@ final class MediaOrphanScanner
     {
         global $wpdb;
 
-        $basedir = $this->basedir();
+        $basedir = UploadDirectory::basedir();
 
         if ($basedir === null) {
             return [];
@@ -114,13 +115,13 @@ final class MediaOrphanScanner
      */
     public function findOrphanFiles(): array
     {
-        $basedir = $this->basedir();
+        $basedir = UploadDirectory::basedir();
 
         if ($basedir === null || ! is_dir($basedir)) {
             return ['items' => [], 'truncated' => false];
         }
 
-        $baseurl = $this->baseurl();
+        $baseurl = UploadDirectory::baseurl();
         $known = $this->knownRelativePaths();
         $orphans = [];
         $truncated = false;
@@ -173,7 +174,7 @@ final class MediaOrphanScanner
      */
     public function deleteOrphanFile(string $relativePath): bool
     {
-        $basedir = $this->basedir();
+        $basedir = UploadDirectory::basedir();
 
         if ($basedir === null) {
             return false;
@@ -232,27 +233,5 @@ final class MediaOrphanScanner
         }
 
         return $known;
-    }
-
-    private function basedir(): ?string
-    {
-        $uploadDir = wp_upload_dir();
-
-        if (! is_array($uploadDir) || ! empty($uploadDir['error']) || empty($uploadDir['basedir'])) {
-            return null;
-        }
-
-        return rtrim((string) $uploadDir['basedir'], '/');
-    }
-
-    private function baseurl(): ?string
-    {
-        $uploadDir = wp_upload_dir();
-
-        if (! is_array($uploadDir) || ! empty($uploadDir['error']) || empty($uploadDir['baseurl'])) {
-            return null;
-        }
-
-        return rtrim((string) $uploadDir['baseurl'], '/');
     }
 }
