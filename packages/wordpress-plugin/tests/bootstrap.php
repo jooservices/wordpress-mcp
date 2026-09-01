@@ -11,6 +11,13 @@ if (! function_exists('__return_false')) {
     }
 }
 
+if (! defined('OBJECT')) {
+    define('OBJECT', 'OBJECT');
+    define('OBJECT_K', 'OBJECT_K');
+    define('ARRAY_A', 'ARRAY_A');
+    define('ARRAY_N', 'ARRAY_N');
+}
+
 if (! function_exists('sanitize_key')) {
     function sanitize_key(string $key): string
     {
@@ -729,6 +736,32 @@ if (! class_exists('wpdb')) {
             sort($matches);
 
             return (string) $matches[0];
+        }
+
+        /**
+         * Stands in for MediaOrphanScanner::knownRelativePaths()' first
+         * query (all `_wp_attached_file` values). Tests that need known
+         * attachments to exist set $GLOBALS['wp_test_wpdb_col_results'];
+         * an empty default matches "no attachments registered yet".
+         *
+         * @return list<string>
+         */
+        public function get_col(string $query): array
+        {
+            return $GLOBALS['wp_test_wpdb_col_results'] ?? [];
+        }
+
+        /**
+         * Stands in for both MediaOrphanScanner queries that return rows
+         * (broken-attachments join, and `_wp_attachment_metadata` values).
+         * Tests set $GLOBALS['wp_test_wpdb_row_results'] for whichever one
+         * they're exercising; an empty default matches "nothing registered".
+         *
+         * @return list<array<string, mixed>>
+         */
+        public function get_results(string $query, mixed ...$args): array
+        {
+            return $GLOBALS['wp_test_wpdb_row_results'] ?? [];
         }
     }
 
