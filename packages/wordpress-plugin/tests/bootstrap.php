@@ -26,6 +26,23 @@ if (! defined('ABSPATH')) {
     }
 
     define('ABSPATH', $absPath);
+
+    // adoptOrphan() require_once's these; the functions they'd define in
+    // real WordPress (wp_generate_attachment_metadata, etc.) are stubbed
+    // directly below instead, so these just need to exist and be empty.
+    $wpAdminIncludes = $absPath . 'wp-admin/includes/';
+
+    if (! is_dir($wpAdminIncludes)) {
+        mkdir($wpAdminIncludes, 0777, true);
+    }
+
+    foreach (['file.php', 'media.php', 'image.php'] as $stubFile) {
+        $stubPath = $wpAdminIncludes . $stubFile;
+
+        if (! is_file($stubPath)) {
+            file_put_contents($stubPath, "<?php\n");
+        }
+    }
 }
 
 if (! function_exists('get_bloginfo')) {
@@ -543,4 +560,154 @@ if (! function_exists('get_post_modified_time')) {
     {
         return '2026-01-01T00:00:00+00:00';
     }
+}
+
+if (! function_exists('get_post_time')) {
+    function get_post_time(string $format, bool $gmt, int $postId): string
+    {
+        return '2026-01-01T00:00:00+00:00';
+    }
+}
+
+if (! function_exists('wp_update_post')) {
+    function wp_update_post(array $postarr): int
+    {
+        $id = (int) ($postarr['ID'] ?? 0);
+        $post = get_post($id);
+
+        if (! $post instanceof WP_Post) {
+            return 0;
+        }
+
+        if (isset($postarr['post_title'])) {
+            $post->post_title = (string) $postarr['post_title'];
+            $GLOBALS['wp_test_post_titles'][$id] = $post->post_title;
+        }
+
+        if (isset($postarr['post_excerpt'])) {
+            $post->post_excerpt = (string) $postarr['post_excerpt'];
+            $GLOBALS['wp_test_post_fields'][$id]['post_excerpt'] = $post->post_excerpt;
+        }
+
+        if (isset($postarr['post_content'])) {
+            $post->post_content = (string) $postarr['post_content'];
+            $GLOBALS['wp_test_post_fields'][$id]['post_content'] = $post->post_content;
+        }
+
+        return $id;
+    }
+}
+
+if (! function_exists('wp_insert_attachment')) {
+    /** @var int $GLOBALS['wp_test_next_attachment_id'] */
+    $GLOBALS['wp_test_next_attachment_id'] = 9000;
+
+    function wp_insert_attachment(array $postarr, string $file = ''): int
+    {
+        $id = $GLOBALS['wp_test_next_attachment_id']++;
+
+        $post = new WP_Post($id, (string) ($postarr['post_content'] ?? ''), 'attachment');
+        $post->post_title = (string) ($postarr['post_title'] ?? '');
+        $post->post_status = (string) ($postarr['post_status'] ?? 'inherit');
+
+        $GLOBALS['wp_test_posts'][$id] = $post;
+        $GLOBALS['wp_test_post_titles'][$id] = $post->post_title;
+        $GLOBALS['wp_test_attachment_mimes'][$id] = (string) ($postarr['post_mime_type'] ?? '');
+        $GLOBALS['wp_test_attachment_files'][$id] = $file;
+
+        $uploadDir = wp_upload_dir();
+        $relative = ltrim(str_replace((string) $uploadDir['basedir'], '', $file), '/');
+        $GLOBALS['wp_test_attachment_urls'][$id] = $uploadDir['baseurl'] . '/' . $relative;
+
+        update_post_meta($id, '_wp_attached_file', $relative);
+
+        return $id;
+    }
+}
+
+if (! function_exists('wp_generate_attachment_metadata')) {
+    /**
+     * Real WordPress renames the attached file to a `-scaled` variant here
+     * for oversized images. Tests simulate that by pre-registering a target
+     * path in $GLOBALS['wp_test_scale_rename'][$file].
+     */
+    function wp_generate_attachment_metadata(int $attachmentId, string $file): array
+    {
+        $renameTo = $GLOBALS['wp_test_scale_rename'][$file] ?? null;
+
+        if (is_string($renameTo) && $renameTo !== '') {
+            $uploadDir = wp_upload_dir();
+            $relative = ltrim(str_replace((string) $uploadDir['basedir'], '', $renameTo), '/');
+
+            $GLOBALS['wp_test_attachment_files'][$attachmentId] = $renameTo;
+            $GLOBALS['wp_test_attachment_urls'][$attachmentId] = $uploadDir['baseurl'] . '/' . $relative;
+            update_post_meta($attachmentId, '_wp_attached_file', $relative);
+        }
+
+        return [
+            'width' => 100,
+            'height' => 100,
+            'sizes' => ['full' => ['file' => basename((string) ($GLOBALS['wp_test_attachment_files'][$attachmentId] ?? $file))]],
+        ];
+    }
+}
+
+if (! function_exists('wp_update_attachment_metadata')) {
+    function wp_update_attachment_metadata(int $attachmentId, array $metadata): bool
+    {
+        $GLOBALS['wp_test_attachment_metadata'][$attachmentId] = $metadata;
+
+        return true;
+    }
+}
+
+if (! class_exists('wpdb')) {
+    /**
+     * Minimal stand-in for the exact query shape MediaService::adoptOrphan()
+     * runs against `_wp_attached_file` postmeta — not a general SQL engine.
+     * Reads from the same $GLOBALS['wp_test_postmeta'] store as
+     * get_post_meta()/update_post_meta() so it can't drift out of sync.
+     */
+    class wpdb
+    {
+        public string $posts = 'wp_posts';
+
+        public string $postmeta = 'wp_postmeta';
+
+        public function prepare(string $query, mixed ...$args): string
+        {
+            if (count($args) === 1 && is_array($args[0])) {
+                $args = $args[0];
+            }
+
+            $i = 0;
+
+            return (string) preg_replace_callback('/%[sd]/', static function (array $m) use ($args, &$i): string {
+                $value = $args[$i] ?? '';
+                $i++;
+
+                return $m[0] === '%d' ? (string) (int) $value : "'" . addslashes((string) $value) . "'";
+            }, $query);
+        }
+
+        public function get_var(string $query): ?string
+        {
+            if (! preg_match("/meta_key = '([^']*)' AND meta_value = '(.*)' LIMIT 1/s", $query, $m)) {
+                return null;
+            }
+
+            [, $key, $value] = $m;
+            $value = stripslashes($value);
+
+            foreach ($GLOBALS['wp_test_postmeta'] ?? [] as $postId => $meta) {
+                if (($meta[$key] ?? null) === $value) {
+                    return (string) $postId;
+                }
+            }
+
+            return null;
+        }
+    }
+
+    $GLOBALS['wpdb'] = new wpdb();
 }

@@ -17,6 +17,31 @@ final class MediaServiceTest extends TestCase
     {
         $GLOBALS['wp_test_max_upload_size'] = 32;
         $GLOBALS['wp_test_options'] = [];
+        $GLOBALS['wp_test_posts'] = [];
+        $GLOBALS['wp_test_postmeta'] = [];
+        $GLOBALS['wp_test_post_titles'] = [];
+        $GLOBALS['wp_test_post_fields'] = [];
+        $GLOBALS['wp_test_attachment_files'] = [];
+        $GLOBALS['wp_test_attachment_urls'] = [];
+        $GLOBALS['wp_test_attachment_mimes'] = [];
+        $GLOBALS['wp_test_attachment_metadata'] = [];
+        $GLOBALS['wp_test_scale_rename'] = [];
+        $GLOBALS['wp_test_filters'] = [];
+        $GLOBALS['wp_test_next_attachment_id'] = 9000;
+
+        add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);
+    }
+
+    private function writeMinimalPng(string $path): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+
+        if (! is_dir(dirname($path))) {
+            mkdir(dirname($path), 0777, true);
+        }
+
+        file_put_contents($path, $png);
     }
 
     #[Test]
@@ -130,5 +155,70 @@ final class MediaServiceTest extends TestCase
         self::assertSame(ErrorCodes::MEDIA_VERIFY_FAILED, $result['error']);
         self::assertContains($result['error_step'], ['post_validate.mime', 'post_validate.mime_not_allowed']);
         self::assertNull($result['media']);
+    }
+
+    #[Test]
+    public function it_reuses_the_same_attachment_when_the_orphan_path_is_re_adopted_after_wordpress_renames_it_to_scaled(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/01/photo-' . uniqid() . '.png';
+        $full = $basedir . '/' . $relative;
+        $this->writeMinimalPng($full);
+
+        $scaledRelative = '2025/01/photo-' . uniqid() . '-scaled.png';
+        $scaledFull = $basedir . '/' . $scaledRelative;
+        $this->writeMinimalPng($scaledFull);
+
+        // Simulates WordPress's own big-image handling: generating metadata
+        // for this file rewrites `_wp_attached_file` to the scaled variant.
+        $GLOBALS['wp_test_scale_rename'][$full] = $scaledFull;
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $first = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertNull($first['error']);
+        self::assertNotNull($first['media']);
+        $firstId = $first['media']['id'];
+
+        // The orphan cache only refreshes daily; simulate it still listing
+        // the original (now stale) path when the adopt is retried.
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans']['orphan_files']['items']
+            = [['path' => $relative, 'url' => null]];
+
+        $second = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertNull($second['error']);
+        self::assertNotNull($second['media']);
+        self::assertSame($firstId, $second['media']['id'], 'Re-adopting the same orphan path must return the existing attachment, not create a duplicate.');
+        self::assertCount(1, $GLOBALS['wp_test_posts']);
+    }
+
+    #[Test]
+    public function it_removes_the_adopted_path_from_the_orphan_cache_after_a_successful_adopt(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/01/photo-' . uniqid() . '.png';
+        $full = $basedir . '/' . $relative;
+        $this->writeMinimalPng($full);
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertNull($result['error']);
+
+        $cached = $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'];
+        self::assertSame([], $cached['orphan_files']['items']);
     }
 }

@@ -169,6 +169,32 @@ final class MediaOrphanScanner
     }
 
     /**
+     * Removes one path from the cached orphan-files list right after it's
+     * adopted, so a stale cache (scan runs at most daily) doesn't keep
+     * offering the same file for adoption before the next scan runs.
+     */
+    public function forgetOrphanFile(string $relativePath): void
+    {
+        $cached = $this->cachedResult();
+
+        if ($cached === null) {
+            return;
+        }
+
+        $items = array_values(array_filter(
+            $cached['orphan_files']['items'],
+            static fn(array $item): bool => $item['path'] !== $relativePath,
+        ));
+
+        if (count($items) === count($cached['orphan_files']['items'])) {
+            return;
+        }
+
+        $cached['orphan_files']['items'] = $items;
+        update_option(self::OPTION_KEY, $cached, false);
+    }
+
+    /**
      * Deletes an orphan file by its path relative to the uploads basedir.
      * Refuses anything that resolves outside the uploads directory.
      */
