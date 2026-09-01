@@ -221,4 +221,84 @@ final class MediaServiceTest extends TestCase
         $cached = $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'];
         self::assertSame([], $cached['orphan_files']['items']);
     }
+
+    private function registerPreFixScaledAttachment(int $id, string $scaledRelative, ?string $originalImageBasename): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $full = $basedir . '/' . $scaledRelative;
+        $this->writeMinimalPng($full);
+
+        $GLOBALS['wp_test_posts'][$id] = new \WP_Post($id, '', 'attachment');
+        $GLOBALS['wp_test_post_titles'][$id] = 'photo';
+        $GLOBALS['wp_test_attachment_mimes'][$id] = 'image/png';
+        $GLOBALS['wp_test_attachment_files'][$id] = $full;
+        $GLOBALS['wp_test_attachment_urls'][$id] = 'https://example.test/wp-content/uploads/' . $scaledRelative;
+        update_post_meta($id, '_wp_attached_file', $scaledRelative);
+
+        $metadata = ['width' => 100, 'height' => 100, 'sizes' => ['full' => ['file' => basename($scaledRelative)]]];
+
+        if ($originalImageBasename !== null) {
+            $metadata['original_image'] = $originalImageBasename;
+        }
+
+        $GLOBALS['wp_test_attachment_metadata'][$id] = $metadata;
+    }
+
+    #[Test]
+    public function it_matches_a_pre_fix_scaled_attachment_via_wordpress_own_original_image_record(): void
+    {
+        $relative = '2025/01/photo-' . uniqid() . '.png';
+        $scaledRelative = '2025/01/' . pathinfo($relative, PATHINFO_FILENAME) . '-scaled.png';
+
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $this->writeMinimalPng($basedir . '/' . $relative);
+
+        // No SOURCE_PATH_META_KEY here — simulates an attachment adopted
+        // before this fix existed, relying only on WordPress's own
+        // `original_image` breadcrumb from when it scaled the file down.
+        $this->registerPreFixScaledAttachment(5000, $scaledRelative, basename($relative));
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertNull($result['error']);
+        self::assertNotNull($result['media']);
+        self::assertSame(5000, $result['media']['id']);
+        self::assertCount(1, $GLOBALS['wp_test_posts'], 'Must resolve to the pre-existing attachment, not insert a duplicate.');
+    }
+
+    #[Test]
+    public function it_does_not_match_an_unrelated_attachment_that_merely_shares_the_scaled_filename_pattern(): void
+    {
+        $relative = '2025/01/photo-' . uniqid() . '.png';
+        $scaledRelative = '2025/01/' . pathinfo($relative, PATHINFO_FILENAME) . '-scaled.png';
+
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $this->writeMinimalPng($basedir . '/' . $relative);
+
+        // Same _wp_attached_file naming coincidence as the real scaling
+        // case, but this attachment's own original filename was something
+        // else entirely — it must not be treated as the same media.
+        $this->registerPreFixScaledAttachment(5001, $scaledRelative, 'unrelated-original.png');
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertNull($result['error']);
+        self::assertNotNull($result['media']);
+        self::assertNotSame(5001, $result['media']['id']);
+        self::assertCount(2, $GLOBALS['wp_test_posts']);
+    }
 }

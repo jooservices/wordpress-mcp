@@ -692,20 +692,28 @@ if (! class_exists('wpdb')) {
 
         public function get_var(string $query): ?string
         {
-            if (! preg_match("/meta_key = '([^']*)' AND meta_value = '(.*)' LIMIT 1/s", $query, $m)) {
+            if (! preg_match("/meta_key = '([^']*)' AND meta_value = '(.*)' (?:ORDER BY post_id ASC )?LIMIT 1/s", $query, $m)) {
                 return null;
             }
 
             [, $key, $value] = $m;
             $value = stripslashes($value);
 
+            $matches = [];
+
             foreach ($GLOBALS['wp_test_postmeta'] ?? [] as $postId => $meta) {
                 if (($meta[$key] ?? null) === $value) {
-                    return (string) $postId;
+                    $matches[] = (int) $postId;
                 }
             }
 
-            return null;
+            if ($matches === []) {
+                return null;
+            }
+
+            sort($matches);
+
+            return (string) $matches[0];
         }
     }
 
