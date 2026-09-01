@@ -10,6 +10,7 @@ use JOOservices\WordPressMcp\Database\Schema;
 use JOOservices\WordPressMcp\Http\RestRegistrar;
 use JOOservices\WordPressMcp\PostTemplates\PostTemplateAdmin;
 use JOOservices\WordPressMcp\PostTemplates\PostTemplateRegistrar;
+use JOOservices\WordPressMcp\Services\MediaOrphanScanner;
 use JOOservices\WordPressMcp\Services\SiteOperationsService;
 use JOOservices\WordPressMcp\Services\SeoService;
 use JOOservices\WordPressMcp\Services\RedirectService;
@@ -17,6 +18,8 @@ use JOOservices\WordPressMcp\Services\RedirectService;
 final class Plugin
 {
     private const PURGE_CRON_HOOK = 'jooservices_mcp_purge_audit_log';
+
+    private const MEDIA_SCAN_CRON_HOOK = 'jooservices_mcp_scan_media_orphans';
 
     public static function boot(): void
     {
@@ -31,11 +34,16 @@ final class Plugin
         if (! wp_next_scheduled(self::PURGE_CRON_HOOK)) {
             wp_schedule_event(time(), 'daily', self::PURGE_CRON_HOOK);
         }
+
+        if (! wp_next_scheduled(self::MEDIA_SCAN_CRON_HOOK)) {
+            wp_schedule_event(time(), 'daily', self::MEDIA_SCAN_CRON_HOOK);
+        }
     }
 
     public static function deactivate(): void
     {
         wp_clear_scheduled_hook(self::PURGE_CRON_HOOK);
+        wp_clear_scheduled_hook(self::MEDIA_SCAN_CRON_HOOK);
     }
 
     public static function purgeAuditLog(): void
@@ -43,12 +51,30 @@ final class Plugin
         (new AuditLogger())->purgeOlderThan();
     }
 
+    public static function scanMediaOrphans(): void
+    {
+        (new MediaOrphanScanner())->runScan();
+    }
+
+    /**
+     * Schedules the media-orphan cron on every load if missing, so sites
+     * that update the plugin without deactivating/reactivating still get it.
+     */
+    public static function ensureMediaScanScheduled(): void
+    {
+        if (! wp_next_scheduled(self::MEDIA_SCAN_CRON_HOOK)) {
+            wp_schedule_event(time(), 'daily', self::MEDIA_SCAN_CRON_HOOK);
+        }
+    }
+
     private function registerHooks(): void
     {
         register_activation_hook(JOOSERVICES_WORDPRESS_MCP_FILE, [self::class, 'activate']);
         register_deactivation_hook(JOOSERVICES_WORDPRESS_MCP_FILE, [self::class, 'deactivate']);
         add_action('plugins_loaded', [Schema::class, 'maybeUpgrade']);
+        add_action('plugins_loaded', [self::class, 'ensureMediaScanScheduled']);
         add_action(self::PURGE_CRON_HOOK, [self::class, 'purgeAuditLog']);
+        add_action(self::MEDIA_SCAN_CRON_HOOK, [self::class, 'scanMediaOrphans']);
         add_action('init', [new PostTemplateRegistrar(), 'register']);
         add_action('rest_api_init', [new RestRegistrar(), 'register']);
         add_action('template_redirect', [self::class, 'enforceMaintenance'], 0);

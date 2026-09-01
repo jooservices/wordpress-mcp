@@ -5,7 +5,7 @@ declare(strict_types=1);
 /**
  * Plugin Name: JOOservices WordPress - MCP
  * Description: Scoped REST API for MCP integration with connection management, audit logging, and rate limiting.
- * Version: 1.4.3
+ * Version: 1.4.4
  * Author: JOOservices
  * Requires at least: 6.4
  * Requires PHP: 8.3

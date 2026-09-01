@@ -327,6 +327,23 @@ if (! function_exists('wp_max_upload_size')) {
     }
 }
 
+if (! function_exists('wp_upload_dir')) {
+    $wpTestUploadBasedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+
+    if (! is_dir($wpTestUploadBasedir)) {
+        mkdir($wpTestUploadBasedir, 0777, true);
+    }
+
+    function wp_upload_dir(): array
+    {
+        return $GLOBALS['wp_test_upload_dir'] ?? [
+            'basedir' => sys_get_temp_dir() . '/jooservices-mcp-test-uploads',
+            'baseurl' => 'https://example.test/wp-content/uploads',
+            'error' => false,
+        ];
+    }
+}
+
 if (! function_exists('get_attached_file')) {
     function get_attached_file(int $attachmentId): string
     {

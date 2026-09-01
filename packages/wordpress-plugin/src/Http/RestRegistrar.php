@@ -8,8 +8,10 @@ use JOOservices\WordPressMcp\Audit\AuditLogger;
 use JOOservices\WordPressMcp\Auth\ConnectionAuthenticator;
 use JOOservices\WordPressMcp\Auth\ScopeChecker;
 use JOOservices\WordPressMcp\Models\Connection;
+use JOOservices\WordPressMcp\Services\BrokenMediaReferenceScanner;
 use JOOservices\WordPressMcp\Services\CommentService;
 use JOOservices\WordPressMcp\Services\ContentService;
+use JOOservices\WordPressMcp\Services\MediaOrphanScanner;
 use JOOservices\WordPressMcp\Services\MediaService;
 use JOOservices\WordPressMcp\Services\NavigationService;
 use JOOservices\WordPressMcp\Services\PluginService;
@@ -121,6 +123,24 @@ final class RestRegistrar
                 'callback' => [$this, 'uploadMedia'],
                 'permission_callback' => [$this, 'authenticate'],
             ],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/media/orphans', [
+            'methods' => 'GET',
+            'callback' => [$this, 'getMediaOrphans'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/media/broken-references', [
+            'methods' => 'GET',
+            'callback' => [$this, 'getBrokenMediaReferences'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+
+        register_rest_route(self::NAMESPACE, '/media/orphans/adopt', [
+            'methods' => 'POST',
+            'callback' => [$this, 'adoptOrphanMedia'],
+            'permission_callback' => [$this, 'authenticate'],
         ]);
 
         register_rest_route(self::NAMESPACE, '/media/(?P<id>\d+)', [
@@ -1180,6 +1200,134 @@ final class RestRegistrar
         );
 
         return new WP_REST_Response($result);
+    }
+
+    public function getMediaOrphans(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::canReadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.read')) {
+            return RequestContext::deny();
+        }
+
+        $result = (new MediaOrphanScanner())->cachedResult();
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'media_orphans',
+            null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result ?? [
+            'scanned_at' => null,
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [], 'truncated' => false],
+        ]);
+    }
+
+    public function getBrokenMediaReferences(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::canReadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.read')) {
+            return RequestContext::deny();
+        }
+
+        $postId = $request->get_param('post_id');
+        $result = (new BrokenMediaReferenceScanner())->scan($postId !== null ? (int) $postId : null);
+
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'read',
+            'media_broken_references',
+            $postId !== null ? (string) $postId : null,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
+    }
+
+    public function adoptOrphanMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        if (! ScopeChecker::canUploadMedia($connection) || ! ScopeChecker::userCan($connection, 'media.upload')) {
+            return RequestContext::deny();
+        }
+
+        $params = $request->get_json_params();
+        $payload = is_array($params) ? $params : [];
+        $result = (new MediaService())->adoptOrphan($payload);
+        $audit = new AuditLogger();
+
+        if ($result['error'] !== null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'adopt',
+                'media',
+                null,
+                false,
+                [
+                    'error' => $result['error'],
+                    'error_step' => $result['error_step'],
+                ],
+                $this->durationMs($startedAt),
+            );
+            $status = match ($result['error']) {
+                ErrorCodes::INVALID_ARGUMENT, ErrorCodes::MEDIA_VERIFY_FAILED => 400,
+                ErrorCodes::MEDIA_NOT_FOUND => 404,
+                default => 403,
+            };
+            $err = ErrorCodes::error(
+                $result['error'],
+                'Failed to adopt orphan media.',
+                $status,
+                array_filter([
+                    'verification_step' => $result['error_step'],
+                    'verification' => $result['verification'],
+                ], static fn(mixed $value): bool => $value !== null),
+            );
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $mediaId = (string) ($result['media']['id'] ?? '');
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'adopt',
+            'media',
+            $mediaId,
+            true,
+            null,
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result['media'], 201);
     }
 
     public function uploadMedia(WP_REST_Request $request): WP_REST_Response|WP_Error

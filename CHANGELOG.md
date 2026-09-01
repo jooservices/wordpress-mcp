@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Media orphan scanner**: new **JOOservices → Media** wp-admin page finds attachments whose file is missing on disk ("broken attachments") and files in the uploads directory with no attachment — original or generated size — referencing them ("orphan files"). Orphan files get a "View" link (opens the file on-site in a new tab) before the delete action. The scan runs daily via WP-Cron and on demand from wp-admin, and its result is cached (`wp_options`, not a live filesystem walk) so the new read-only `wordpress_get_media_orphans` MCP tool can return it cheaply — the walk itself stays out of the MCP/REST surface since it's too slow for a synchronous tool call. Delete actions remain wp-admin only (confirm-gated), not exposed to MCP.
+- **Broken inline media reference finder**: new read-only `wordpress_find_broken_media_references` MCP tool scans post/page content for `wp-image-{ID}` references where `{ID}` no longer resolves to a real attachment, and matches each one against the cached orphan-file scan by the exact path parsed from the broken tag's own `src` — never a filename guess. A match means the source file still exists and can be re-uploaded and relinked (`wordpress_upload_media` + `wordpress_update_content` with `confirm: true`); no match means the file is gone and can't be recovered automatically.
+- **Orphan file adoption (no re-upload)**: new `wordpress_adopt_orphan_media` MCP tool registers an orphan file already reported by `wordpress_get_media_orphans` / `wordpress_find_broken_media_references` as a real attachment without copying or re-uploading its bytes — WordPress points the new attachment straight at the file already on disk, so fixing a broken reference no longer creates a duplicate file. Only a path/URL the cached orphan scan actually reported can be adopted; adopting the same file twice is idempotent and returns the existing attachment. Runs the same verification pipeline (decode, metadata, subsizes, public URL) as `wordpress_upload_media`.
+
+### Fixed
+
+- **Media upload failure visibility (MCP server + WordPress plugin)**: `wordpress_upload_media` failures now return the WordPress plugin's `verification_step` / `verification` detail to the MCP client instead of a bare error code, and `wordpress_get_mcp_activity` (`mode: logs`) now includes each row's stored `metadata` (`error`, `error_step`). Previously both paths silently dropped this diagnostic detail even though the plugin's verified media pipeline already computed it.
+
 ## [1.4.3] - 2026-08-31
 
 ### Fixed

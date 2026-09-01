@@ -1120,6 +1120,110 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_get_media_orphans",
+      title: "Get WordPress media orphan scan results",
+      description:
+        "Returns the last cached result of the wp-admin media orphan scan (JOOservices → Media): attachments whose file is missing on disk, and files on disk with no attachment referencing them. Read-only, does not run a fresh scan — that runs daily via WP-Cron or on demand from wp-admin, since a full filesystem walk is too slow for a tool call. scanned_at is null if the site has never scanned.",
+      inputSchema: z.object({ site: siteSchema }),
+      access: "read",
+    },
+    async ({ client, siteId }: ToolContext<{ site?: string }>) => {
+      const result = await client.get("/media/orphans");
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: withSiteMeta(siteId, result as Record<string, unknown>),
+      };
+    },
+  );
+
+  const findBrokenMediaReferencesSchema = z.object({
+    site: siteSchema,
+    post_id: z.number().int().positive().optional().describe("Limit to one post/page. Omit to scan the most recent 200 published posts/pages."),
+  });
+  type FindBrokenMediaReferencesArgs = z.infer<typeof findBrokenMediaReferencesSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_find_broken_media_references",
+      title: "Find broken inline media references",
+      description:
+        "Scans post/page content for wp-image-{ID} references where {ID} no longer resolves to a real attachment (e.g. after a migration). For each broken reference, checks the exact file path named in its own src against the cached media-orphan scan (wordpress_get_media_orphans) — matched_orphan_url is set only on an exact path match, never a filename guess; null means the source file itself is gone and cannot be recovered. Read-only: to fix a match, upload matched_orphan_url's file with wordpress_upload_media, then rewrite the post's content (replacing the broken id and src) with wordpress_update_content (confirm: true).",
+      inputSchema: findBrokenMediaReferencesSchema,
+      access: "read",
+    },
+    async ({ client, siteId, args }: ToolContext<FindBrokenMediaReferencesArgs>) => {
+      const result = await client.get("/media/broken-references", { post_id: args.post_id });
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+        structuredContent: withSiteMeta(siteId, result as Record<string, unknown>),
+      };
+    },
+  );
+
+  const adoptOrphanMediaSchema = z.object({
+    site: siteSchema,
+    path: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Orphan file's relative path from wordpress_get_media_orphans' orphan_files[].path. Provide this or url."),
+    url: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("Orphan file's public URL — wordpress_get_media_orphans' orphan_files[].url or wordpress_find_broken_media_references' matched_orphan_url, passed verbatim. Provide this or path."),
+    title: z.string().optional().describe("Attachment title. Defaults to the file's base name."),
+    alt_text: z.string().optional(),
+    caption: z.string().optional(),
+    description: z.string().optional(),
+    post_id: z.number().int().positive().optional().describe("Optional post ID to attach as featured image after verification passes."),
+    set_featured: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("When true with post_id, sets the featured image only after all verification passes."),
+  });
+  type AdoptOrphanMediaArgs = z.infer<typeof adoptOrphanMediaSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_adopt_orphan_media",
+      title: "Adopt orphan media file",
+      description:
+        "Registers an existing orphan file (from wordpress_get_media_orphans or wordpress_find_broken_media_references' matched_orphan_url) as a real WordPress attachment WITHOUT re-uploading or copying bytes — WordPress points the new attachment straight at the file already on disk, so no duplicate file is created. Only accepts a path/url the cached orphan scan actually reported. Idempotent: adopting the same file twice returns the existing attachment instead of creating a second record. Runs the same verification pipeline as wordpress_upload_media (decode, metadata, subsizes, public URL). Use the returned id to relink broken wp:image blocks and featured_media with wordpress_update_content.",
+      inputSchema: adoptOrphanMediaSchema,
+      access: "write",
+      dto: { kind: "media" },
+    },
+    async ({ client, siteId, args }: ToolContext<AdoptOrphanMediaArgs>) => {
+      const item = await client.post<MediaDto>("/media/orphans/adopt", wpArgs(args));
+      const verification = item.verification;
+      const passed = verification?.passed === true;
+      return {
+        content: [
+          {
+            type: "text",
+            text: passed
+              ? `Adopted orphan file as verified media #${item.id} on site "${siteId}".`
+              : `Adopted orphan file as media #${item.id} on site "${siteId}", but verification did not pass.`,
+          },
+        ],
+        structuredContent: withSiteMeta(siteId, item),
+      };
+    },
+  );
+
   const uploadMediaSchema = z.object({
     site: siteSchema,
     title: z.string().min(1).describe("Human-readable image subject. With image_type, WordPress builds the stored filename as slug(title)-slug(image_type).ext."),

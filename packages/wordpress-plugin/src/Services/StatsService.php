@@ -69,22 +69,27 @@ final class StatsService
 
         $total = (int) $this->scalar($wpdb, "SELECT COUNT(*) FROM {$table} {$where}", $bindings);
 
-        $rowsSql = "SELECT id, request_id, action, resource_type, resource_id, success, duration_ms, created_at
+        $rowsSql = "SELECT id, request_id, action, resource_type, resource_id, success, metadata, duration_ms, created_at
             FROM {$table} {$where} ORDER BY id DESC LIMIT %d OFFSET %d";
         $rows = $wpdb->get_results($wpdb->prepare($rowsSql, [...$bindings, $perPage, $offset]), ARRAY_A);
 
         return [
             'items' => array_map(
-                static fn(array $row): array => [
-                    'id' => (int) $row['id'],
-                    'request_id' => (string) $row['request_id'],
-                    'action' => (string) $row['action'],
-                    'resource_type' => (string) $row['resource_type'],
-                    'resource_id' => $row['resource_id'],
-                    'success' => (bool) $row['success'],
-                    'duration_ms' => $row['duration_ms'] !== null ? (int) $row['duration_ms'] : null,
-                    'created_at' => (string) $row['created_at'],
-                ],
+                static function (array $row): array {
+                    $metadata = is_string($row['metadata']) ? json_decode($row['metadata'], true) : null;
+
+                    return [
+                        'id' => (int) $row['id'],
+                        'request_id' => (string) $row['request_id'],
+                        'action' => (string) $row['action'],
+                        'resource_type' => (string) $row['resource_type'],
+                        'resource_id' => $row['resource_id'],
+                        'success' => (bool) $row['success'],
+                        'metadata' => is_array($metadata) ? $metadata : null,
+                        'duration_ms' => $row['duration_ms'] !== null ? (int) $row['duration_ms'] : null,
+                        'created_at' => (string) $row['created_at'],
+                    ];
+                },
                 $rows ?: [],
             ),
             'pagination' => [
