@@ -17,4 +17,18 @@ describe("normalizeWordPressError", () => {
     const error = normalizeWordPressError(429, { message: "slow down" });
     expect(error.code).toBe("RATE_LIMITED");
   });
+
+  it("preserves the WP_Error data payload for diagnostics", () => {
+    const error = normalizeWordPressError(400, {
+      code: "MEDIA_VERIFY_FAILED",
+      message: "Failed to upload media.",
+      data: { status: 400, verification_step: "pre_validate.decode", verification: { decode_ok: false } },
+    });
+
+    expect(error.data).toEqual({
+      status: 400,
+      verification_step: "pre_validate.decode",
+      verification: { decode_ok: false },
+    });
+  });
 });

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Media upload failure visibility (MCP server + WordPress plugin)**: `wordpress_upload_media` failures now return the WordPress plugin's `verification_step` / `verification` detail to the MCP client instead of a bare error code, and `wordpress_get_mcp_activity` (`mode: logs`) now includes each row's stored `metadata` (`error`, `error_step`). Previously both paths silently dropped this diagnostic detail even though the plugin's verified media pipeline already computed it.
+
 ## [1.4.3] - 2026-08-31
 
 ### Fixed
