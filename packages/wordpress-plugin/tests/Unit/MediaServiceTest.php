@@ -274,7 +274,7 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
-    public function it_does_not_match_an_unrelated_attachment_that_merely_shares_the_scaled_filename_pattern(): void
+    public function it_refuses_to_adopt_when_the_scaled_variant_path_belongs_to_an_unrelated_attachment(): void
     {
         $relative = '2025/01/photo-' . uniqid() . '.png';
         $scaledRelative = '2025/01/' . pathinfo($relative, PATHINFO_FILENAME) . '-scaled.png';
@@ -284,7 +284,9 @@ final class MediaServiceTest extends TestCase
 
         // Same _wp_attached_file naming coincidence as the real scaling
         // case, but this attachment's own original filename was something
-        // else entirely — it must not be treated as the same media.
+        // else entirely — it must not be treated as the same media. Nor may
+        // adoption proceed to a new attachment: WordPress's scaling would
+        // overwrite this unrelated attachment's actual file on disk.
         $this->registerPreFixScaledAttachment(5001, $scaledRelative, 'unrelated-original.png');
 
         $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
@@ -296,9 +298,37 @@ final class MediaServiceTest extends TestCase
         $service = new MediaService();
         $result = $service->adoptOrphan(['path' => $relative]);
 
-        self::assertNull($result['error']);
-        self::assertNotNull($result['media']);
-        self::assertNotSame(5001, $result['media']['id']);
-        self::assertCount(2, $GLOBALS['wp_test_posts']);
+        self::assertSame(ErrorCodes::INVALID_ARGUMENT, $result['error']);
+        self::assertSame('pre_validate.scaled_variant_exists', $result['error_step']);
+        self::assertNull($result['media']);
+        self::assertCount(1, $GLOBALS['wp_test_posts'], 'Must not insert a new attachment that would overwrite the unrelated one\'s file.');
+    }
+
+    #[Test]
+    public function it_refuses_to_adopt_when_a_file_already_sits_at_the_scaled_variant_path(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/01/photo-' . uniqid() . '.png';
+        $scaledRelative = '2025/01/' . pathinfo($relative, PATHINFO_FILENAME) . '-scaled.png';
+
+        $this->writeMinimalPng($basedir . '/' . $relative);
+        // No attachment claims this — it's an unrelated file (or an orphan
+        // scaled leftover) sitting exactly where WordPress's own scaling
+        // would write to. Adopting must not risk silently overwriting it.
+        $this->writeMinimalPng($basedir . '/' . $scaledRelative);
+
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        $service = new MediaService();
+        $result = $service->adoptOrphan(['path' => $relative]);
+
+        self::assertSame(ErrorCodes::INVALID_ARGUMENT, $result['error']);
+        self::assertSame('pre_validate.scaled_variant_exists', $result['error_step']);
+        self::assertNull($result['media']);
+        self::assertCount(0, $GLOBALS['wp_test_posts']);
     }
 }

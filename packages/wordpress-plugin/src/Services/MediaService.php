@@ -286,6 +286,22 @@ final class MediaService
         }
 
         if ($isNewAdoption) {
+            // No attachment claims the derived `-scaled` path (the lookups
+            // above would have matched it via findAttachmentByScaledVariant()
+            // otherwise), but a physical file can still sit there — e.g. its
+            // owning attachment was deleted, or it's an unrelated orphan that
+            // coincidentally shares the name (this site's own orphan scan has
+            // both plain "-scaled" and WP-uniquified "-scaled-1" leftovers).
+            // Whether WordPress's scaling then overwrites that file in place
+            // or renames around it depends on core internals we don't
+            // control; either outcome is a problem we can avoid entirely by
+            // refusing up front instead of gambling on which one happens.
+            $scaledRelative = $this->deriveScaledRelativePath($relativePath);
+
+            if ($scaledRelative !== null && is_file($basedir . '/' . $scaledRelative)) {
+                return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.scaled_variant_exists');
+            }
+
             require_once ABSPATH . 'wp-admin/includes/file.php';
             require_once ABSPATH . 'wp-admin/includes/media.php';
             require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -673,6 +689,26 @@ final class MediaService
     }
 
     /**
+     * Deterministic `-scaled` filename WordPress's own big-image handling
+     * would use for this path (`wp-admin/includes/image.php`'s
+     * `WP_Image_Editor::generate_filename('scaled')`), which inserts the
+     * suffix with no uniqueness check — null when the path has no extension.
+     */
+    private function deriveScaledRelativePath(string $relativePath): ?string
+    {
+        $info = pathinfo($relativePath);
+        $extension = $info['extension'] ?? '';
+
+        if ($extension === '') {
+            return null;
+        }
+
+        $dir = $info['dirname'] !== '.' ? $info['dirname'] . '/' : '';
+
+        return $dir . $info['filename'] . '-scaled.' . $extension;
+    }
+
+    /**
      * Retroactive fallback for images WordPress already scaled *before*
      * {@see SOURCE_PATH_META_KEY} existed, so they never got that meta.
      * WordPress itself records the pre-scale filename as `original_image`
@@ -685,15 +721,13 @@ final class MediaService
     /** @phpstan-ignore-next-line return.unusedType The wordpress-stubs shape for wp_get_attachment_metadata() omits 'original_image', a real key WP core only adds for scaled attachments — PHPStan can't see the branch below ever matching. */
     private function findAttachmentByScaledVariant(string $relativePath): ?int
     {
-        $info = pathinfo($relativePath);
-        $extension = $info['extension'] ?? '';
+        $scaledRelative = $this->deriveScaledRelativePath($relativePath);
 
-        if ($extension === '') {
+        if ($scaledRelative === null) {
             return null;
         }
 
-        $dir = $info['dirname'] !== '.' ? $info['dirname'] . '/' : '';
-        $candidateId = $this->findAttachmentByAttachedFile($dir . $info['filename'] . '-scaled.' . $extension);
+        $candidateId = $this->findAttachmentByAttachedFile($scaledRelative);
 
         if ($candidateId === null) {
             return null;
