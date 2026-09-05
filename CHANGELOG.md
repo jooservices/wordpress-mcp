@@ -234,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.6...develop
+[1.4.6]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...v1.4.3
