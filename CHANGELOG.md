@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-09-05
+
 ### Changed
 
-- Align repo with JOOservices package standards: project-only `AGENTS.md`, root docs (`GOVERNANCE`, `CODE_OF_CONDUCT`), Dependabot, CODEOWNERS, commitlint / semantic PR title workflows, Gitleaks in CI, CaptainHook install path, and MCP server version strings synced to **1.4.5**.
+- Align repo with JOOservices package standards: project-only `AGENTS.md`, root docs (`GOVERNANCE`, `CODE_OF_CONDUCT`), Dependabot, CODEOWNERS, commitlint / semantic PR title workflows, Gitleaks in CI, CaptainHook install path, and MCP server version strings synced across packages.
 - Document intentional PHP **`^8.3`** floor (WordPress host / `wordpress:php8.3-apache` compatibility).
 - Dev connection seed now grants `ScopeChecker::ALL_SCOPES` so Docker E2E can exercise the full tool surface.
 
