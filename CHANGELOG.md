@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-09-05
+
 ### Changed
 
-- Align repo with JOOservices package standards: project-only `AGENTS.md`, root docs (`GOVERNANCE`, `CODE_OF_CONDUCT`), Dependabot, CODEOWNERS, commitlint / semantic PR title workflows, Gitleaks in CI, CaptainHook install path, and MCP server version strings synced to **1.4.5**.
+- Align repo with JOOservices package standards: project-only `AGENTS.md`, root docs (`GOVERNANCE`, `CODE_OF_CONDUCT`), Dependabot, CODEOWNERS, commitlint / semantic PR title workflows, Gitleaks in CI, CaptainHook install path, and MCP server version strings synced across packages.
 - Document intentional PHP **`^8.3`** floor (WordPress host / `wordpress:php8.3-apache` compatibility).
 - Dev connection seed now grants `ScopeChecker::ALL_SCOPES` so Docker E2E can exercise the full tool surface.
 
@@ -232,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.6...develop
+[1.4.6]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...v1.4.3
