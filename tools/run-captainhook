@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+exec docker compose run --rm --no-deps -w /app php \
+  packages/wordpress-plugin/vendor/bin/captainhook \
+  --configuration=/app/captainhook.json \
+  --bootstrap=packages/wordpress-plugin/vendor/autoload.php \
+  "$@"

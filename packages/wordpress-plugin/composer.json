@@ -7,6 +7,8 @@
         "php": "^8.3"
     },
     "require-dev": {
+        "captainhook/captainhook": "^5.25",
+        "captainhook/plugin-composer": "^5.3",
         "fakerphp/faker": "^1.24",
         "laravel/pint": "^1.18",
         "php-stubs/wordpress-stubs": "^6.8",
@@ -41,6 +43,8 @@
     },
     "config": {
         "sort-packages": true,
-        "allow-plugins": {}
+        "allow-plugins": {
+            "captainhook/plugin-composer": true
+        }
     }
 }

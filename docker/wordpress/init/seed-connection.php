@@ -12,6 +12,7 @@ if (! defined('ABSPATH')) {
 require_once ABSPATH . 'wp-content/plugins/wordpress-chatgpt/vendor/autoload.php';
 
 use JOOservices\WordPressMcp\Auth\ConnectionAuthenticator;
+use JOOservices\WordPressMcp\Auth\ScopeChecker;
 use JOOservices\WordPressMcp\Database\Schema;
 
 Schema::install();
@@ -26,46 +27,7 @@ $existing = $wpdb->get_var(
     $wpdb->prepare("SELECT id FROM {$table} WHERE token_hash = %s LIMIT 1", $hash),
 );
 
-$scopes = [
-    'site.read',
-    'seo.robots.update',
-    'posts.read',
-    'posts.templates.read',
-    'posts.create',
-    'posts.update',
-    'posts.publish',
-    'pages.read',
-    'pages.templates.read',
-    'pages.create',
-    'pages.update',
-    'pages.publish',
-    'comments.read',
-    'comments.moderate',
-    'terms.read',
-    'media.read',
-    'media.upload',
-    'media.embed',
-    'media.update',
-    'media.delete',
-    'settings.read',
-    'settings.update',
-    'plugins.read',
-    'plugins.install',
-    'plugins.activate',
-    'plugins.deactivate',
-    'plugins.update',
-    'plugins.delete',
-    'themes.read',
-    'themes.install',
-    'themes.activate',
-    'themes.update',
-    'themes.delete',
-    'users.read',
-    'users.create',
-    'users.update',
-    'users.assign_roles',
-    'users.delete',
-];
+$scopes = ScopeChecker::ALL_SCOPES;
 
 if ($existing) {
     $wpdb->update(

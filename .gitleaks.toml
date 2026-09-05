@@ -1,0 +1,12 @@
+title = "gitleaks"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Allowlisted files"
+paths = [
+  '''(.*?)(png|jpg|gif|svg)$''',
+  '''^packages/wordpress-plugin/composer\.lock$''',
+  '''^packages/mcp-server/package-lock\.json$''',
+]

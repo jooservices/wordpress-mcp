@@ -9,24 +9,56 @@ use WP_Term;
 
 final class NavigationService
 {
+    /**
+     * WordPress 6.x exposes wp_get_nav_menu_locations(); 7.x renamed it to
+     * get_nav_menu_locations().
+     *
+     * @return array<string, int>
+     */
+    private function locations(): array
+    {
+        if (\function_exists('wp_get_nav_menu_locations')) {
+            /** @var array<string, int> $locations */
+            $locations = \wp_get_nav_menu_locations();
+
+            return $locations;
+        }
+
+        /** @var array<string, int> $locations */
+        $locations = \get_nav_menu_locations();
+
+        return $locations;
+    }
+
+    /** @param array<string, int> $locations */
+    private function persistLocations(array $locations): void
+    {
+        if (\function_exists('wp_set_nav_menu_locations')) {
+            \wp_set_nav_menu_locations($locations);
+
+            return;
+        }
+
+        \set_theme_mod('nav_menu_locations', $locations);
+    }
+
     /** @return array{items: list<array<string, mixed>>, locations: array<string, int>} */
     public function list(): array
     {
         $items = [];
-        foreach (wp_get_nav_menus() as $menu) {
+        foreach (\wp_get_nav_menus() as $menu) {
             if ($menu instanceof WP_Term) {
                 $items[] = $this->normalize($menu, false);
             }
         }
 
-        /** @phpstan-ignore-next-line WordPress core navigation function is loaded at runtime. */
-        return ['items' => $items, 'locations' => wp_get_nav_menu_locations()];
+        return ['items' => $items, 'locations' => $this->locations()];
     }
 
     /** @return array{menu: array<string, mixed>|null, error: string|null} */
     public function get(int $id): array
     {
-        $menu = wp_get_nav_menu_object($id);
+        $menu = \wp_get_nav_menu_object($id);
 
         return $menu instanceof WP_Term
             ? ['menu' => $this->normalize($menu, true), 'error' => null]
@@ -36,21 +68,21 @@ final class NavigationService
     /** @return array{menu: array<string, mixed>|null, error: string|null} */
     public function create(string $name): array
     {
-        $id = wp_create_nav_menu(sanitize_text_field($name));
-        return is_wp_error($id) ? ['menu' => null, 'error' => ErrorCodes::WORDPRESS_ERROR] : $this->get((int) $id);
+        $id = \wp_create_nav_menu(\sanitize_text_field($name));
+        return \is_wp_error($id) ? ['menu' => null, 'error' => ErrorCodes::WORDPRESS_ERROR] : $this->get((int) $id);
     }
 
     /** @return array{menu: array<string, mixed>|null, error: string|null} */
     public function update(int $id, string $name): array
     {
-        $result = wp_update_nav_menu_object($id, ['menu-name' => sanitize_text_field($name)]);
-        return is_wp_error($result) ? ['menu' => null, 'error' => ErrorCodes::WORDPRESS_ERROR] : $this->get($id);
+        $result = \wp_update_nav_menu_object($id, ['menu-name' => \sanitize_text_field($name)]);
+        return \is_wp_error($result) ? ['menu' => null, 'error' => ErrorCodes::WORDPRESS_ERROR] : $this->get($id);
     }
 
     /** @return array{deleted: bool, error: string|null} */
     public function delete(int $id): array
     {
-        return wp_delete_nav_menu($id)
+        return \wp_delete_nav_menu($id)
             ? ['deleted' => true, 'error' => null]
             : ['deleted' => false, 'error' => ErrorCodes::INVALID_ARGUMENT];
     }
@@ -58,8 +90,7 @@ final class NavigationService
     /** @param array<string, int> $locations */
     public function setLocations(array $locations): void
     {
-        /** @phpstan-ignore-next-line WordPress core navigation function is loaded at runtime. */
-        wp_set_nav_menu_locations($locations);
+        $this->persistLocations($locations);
     }
 
     /**
@@ -68,12 +99,12 @@ final class NavigationService
      */
     public function saveItem(int $menuId, ?int $itemId, array $data): array
     {
-        if (! wp_get_nav_menu_object($menuId) instanceof WP_Term) {
+        if (! \wp_get_nav_menu_object($menuId) instanceof WP_Term) {
             return ['item' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
         $args = [
-            'menu-item-title' => sanitize_text_field((string) ($data['title'] ?? '')),
-            'menu-item-url' => esc_url_raw((string) ($data['url'] ?? '')),
+            'menu-item-title' => \sanitize_text_field((string) ($data['title'] ?? '')),
+            'menu-item-url' => \esc_url_raw((string) ($data['url'] ?? '')),
             'menu-item-status' => 'publish',
             'menu-item-parent-id' => (int) ($data['parent_id'] ?? 0),
             'menu-item-position' => (int) ($data['position'] ?? 0),
@@ -81,16 +112,16 @@ final class NavigationService
         if ($args['menu-item-title'] === '' || $args['menu-item-url'] === '') {
             return ['item' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
-        $id = wp_update_nav_menu_item($menuId, $itemId ?? 0, $args);
-        if (is_wp_error($id)) {
+        $id = \wp_update_nav_menu_item($menuId, $itemId ?? 0, $args);
+        if (\is_wp_error($id)) {
             return ['item' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
         }
-        $item = get_post((int) $id);
+        $item = \get_post((int) $id);
         return $item instanceof \WP_Post
             ? [
                 'item' => [
                     'id' => $item->ID, 'title' => $item->post_title,
-                    'url' => get_post_meta($item->ID, '_menu_item_url', true),
+                    'url' => \get_post_meta($item->ID, '_menu_item_url', true),
                 ],
                 'error' => null,
             ]
@@ -100,7 +131,7 @@ final class NavigationService
     /** @return array{deleted: bool, error: string|null} */
     public function deleteItem(int $itemId): array
     {
-        return wp_delete_post($itemId, true) instanceof \WP_Post
+        return \wp_delete_post($itemId, true) instanceof \WP_Post
             ? ['deleted' => true, 'error' => null]
             : ['deleted' => false, 'error' => ErrorCodes::INVALID_ARGUMENT];
     }
@@ -110,11 +141,11 @@ final class NavigationService
     {
         $result = ['id' => (int) $menu->term_id, 'name' => $menu->name, 'slug' => $menu->slug];
         if ($withItems) {
-            $result['items'] = array_map(static fn($item): array => [
+            $result['items'] = \array_map(static fn($item): array => [
                 'id' => (int) $item->ID, 'title' => $item->title, 'url' => $item->url,
                 'parent_id' => (int) $item->menu_item_parent, 'position' => (int) $item->menu_order,
                 'type' => $item->type, 'object_id' => (int) $item->object_id,
-            ], wp_get_nav_menu_items($menu) ?: []);
+            ], \wp_get_nav_menu_items($menu) ?: []);
         }
         return $result;
     }

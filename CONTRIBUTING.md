@@ -5,14 +5,17 @@ Thank you for considering a contribution to `jooservices/wordpress-mcp`.
 ## Requirements
 
 - Docker with Docker Compose — **all** tooling runs in containers
-- Familiarity with WordPress plugin development (PHP 8.3) and TypeScript (Node 24)
+- Familiarity with WordPress plugin development (PHP `^8.3`) and TypeScript (Node 24)
+
+PHP stays on **`^8.3`** to match supported WordPress PHP runtimes (`wordpress:php8.3-apache` in Compose). Do not raise the plugin requirement to 8.5 unless WordPress host policy changes.
 
 ## Setup
 
 ```bash
 make build
 make install
-make up          # optional: local WordPress + MCP stack
+tools/install-git-hooks   # CaptainHook via Docker (required)
+make up                   # optional: local WordPress + MCP stack
 ```
 
 ## Git workflow
@@ -22,8 +25,6 @@ make up          # optional: local WordPress + MCP stack
 - Branch from `develop`: `feature/*`, `fix/*`, `docs/*`, `chore/*`
 - Releases: `release/<version>` from `develop` → PR to `master` → tag from `master` → merge back to `develop`
 - Never commit directly to `develop` or `master`
-
-Follow workspace [AGENTS.md](../AGENTS.md) for identity, commits, and quality gates.
 
 ## Commit convention
 
@@ -39,9 +40,11 @@ docs: Update ChatGPT connector guide
 
 ```bash
 make ci
+make e2e    # Docker: WordPress + plugin + MCP, all 45 tools
 ```
 
-This runs Pint, PHPCS, PHPStan, PHPUnit (plugin) and TypeScript build + Vitest (MCP server).
+`make ci` runs Pint, PHPCS, PHPStan, PHPMD, PHPUnit (plugin) and TypeScript build + Vitest (MCP server).
+`make e2e` starts the Compose stack and runs `packages/mcp-server/tests/e2e.test.ts`.
 
 **Never bypass hooks with `--no-verify`.**
 

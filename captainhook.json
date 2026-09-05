@@ -1,0 +1,61 @@
+{
+    "$schema": "https://captainhookphp.github.io/captainhook/schema.json",
+    "commit-msg": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "\\CaptainHook\\App\\Hook\\Message\\Action\\Regex",
+                "options": {
+                    "regex": "/^(feat|fix|docs|style|refactor|perf|test|chore|ci|build|revert)(\\(.+\\))?!?:\\s[A-Z].{0,99}$/",
+                    "error": "Commit message must follow Conventional Commits with an uppercase subject: <type>(<scope>): Subject"
+                }
+            }
+        ]
+    },
+    "pre-commit": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "echo '🔒 Scanning for secrets...' && if ! command -v gitleaks >/dev/null 2>&1; then echo 'Note: gitleaks not available in this environment; CI still scans on push'; exit 0; fi; gitleaks protect --staged --verbose --redact --config=.gitleaks.toml",
+                "conditions": []
+            },
+            {
+                "action": "echo 'Running PHP linters...' && cd packages/wordpress-plugin && composer lint:all",
+                "conditions": []
+            }
+        ]
+    },
+    "pre-push": {
+        "enabled": true,
+        "actions": [
+            {
+                "action": "echo '🔒 Scanning commits for secrets...' && if ! command -v gitleaks >/dev/null 2>&1; then echo 'Note: gitleaks not available in this environment; CI still scans on push'; exit 0; fi; default_ref=$(git symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/@@'); gitleaks detect --verbose --redact --config=.gitleaks.toml --log-opts=\"${default_ref:-origin/develop}..HEAD\"",
+                "conditions": []
+            },
+            {
+                "action": "echo 'Running PHP tests...' && cd packages/wordpress-plugin && composer test",
+                "conditions": []
+            }
+        ]
+    },
+    "post-merge": {
+        "enabled": false,
+        "actions": []
+    },
+    "post-checkout": {
+        "enabled": false,
+        "actions": []
+    },
+    "post-rewrite": {
+        "enabled": false,
+        "actions": []
+    },
+    "post-change": {
+        "enabled": false,
+        "actions": []
+    },
+    "prepare-commit-msg": {
+        "enabled": false,
+        "actions": []
+    }
+}

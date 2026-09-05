@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-09-05
+
+### Changed
+
+- Align repo with JOOservices package standards: project-only `AGENTS.md`, root docs (`GOVERNANCE`, `CODE_OF_CONDUCT`), Dependabot, CODEOWNERS, commitlint / semantic PR title workflows, Gitleaks in CI, CaptainHook install path, and MCP server version strings synced across packages.
+- Document intentional PHP **`^8.3`** floor (WordPress host / `wordpress:php8.3-apache` compatibility).
+- Dev connection seed now grants `ScopeChecker::ALL_SCOPES` so Docker E2E can exercise the full tool surface.
+
+### Added
+
+- Docker E2E suite (`make e2e` / `scripts/e2e.sh`): brings up WordPress + plugin + MCP, then Vitest `tests/e2e.test.ts` calls **all 45** MCP tools over Streamable HTTP.
+- Compose mu-plugin helpers for Docker (skip public-URL verify; raise rate limit for E2E).
+- README badges aligned with `dto` / `client` (CI, Codecov, Sonar, OpenSSF Scorecard, PHP, Node, version, License); add OpenSSF Scorecard workflow + `sonar-project.properties`.
+- `make mcp-up` / `scripts/mcp-up.sh`: interactive prompts (site URL → token → add another?) then start production MCP Docker — no hand-written `WORDPRESS_SITES` JSON. Optional publish mode: local, HTTPS (Caddy + Let's Encrypt), or ngrok tunnel.
+
+### Fixed
+
+- **Navigation menus on WordPress 7.x**: `wp_get_nav_menu_locations()` / `wp_set_nav_menu_locations()` were removed; the plugin now uses the 7.x `get_nav_menu_locations()` API with a 6.x fallback.
+- Force transitive `qs` to `^6.16.0` via npm `overrides` (Dependabot medium advisory / `npm audit`).
+
 ## [1.4.5] - 2026-09-01
 
 ### Fixed
@@ -214,7 +234,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.6...develop
+[1.4.6]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.2...v1.4.3

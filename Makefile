@@ -1,4 +1,4 @@
-.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration logs plugin-release prod-up prod-https prod-tunnel prod-down prod-logs
+.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e logs plugin-release mcp-up mcp-down prod-up prod-https prod-tunnel prod-down prod-logs
 
 DOCKER_COMPOSE ?= docker compose
 PHP = $(DOCKER_COMPOSE) run --rm php
@@ -7,7 +7,7 @@ PROD_COMPOSE = $(DOCKER_COMPOSE) -f docker-compose.prod.yml --env-file .env.prod
 
 up:
 	$(DOCKER_COMPOSE) build php
-	$(PHP) composer install --no-interaction
+	$(PHP) composer install --no-interaction --no-scripts
 	$(DOCKER_COMPOSE) up -d --build db wordpress
 	@sleep 5
 	$(DOCKER_COMPOSE) run --rm wp-init
@@ -20,13 +20,13 @@ build:
 	$(DOCKER_COMPOSE) build php mcp
 
 install:
-	$(PHP) composer install
+	$(PHP) composer install --no-scripts
 	$(NODE) sh -c "corepack enable && pnpm install"
 
 ci: build
-	$(PHP) composer install --no-interaction
+	$(PHP) composer install --no-interaction --no-scripts
 	$(PHP) composer ci
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm run ci"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm ci && npm run ci"
 
 test: test-php test-mcp
 
@@ -34,14 +34,18 @@ test-php:
 	$(PHP) composer test
 
 test-mcp:
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm test"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm ci && npm test"
 
 lint:
 	$(PHP) composer lint:all
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm run lint"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm ci && npm run lint"
 
 integration:
 	$(DOCKER_COMPOSE) --profile integration run --rm integration
+
+e2e:
+	chmod +x scripts/e2e.sh
+	./scripts/e2e.sh
 
 shell-php:
 	$(DOCKER_COMPOSE) run --rm php bash
@@ -56,8 +60,15 @@ plugin-release:
 	chmod +x scripts/build-plugin-release.sh
 	./scripts/build-plugin-release.sh
 
+# Interactive: prompts for site URL + token (repeat for more sites), writes .env.prod, starts MCP.
+mcp-up:
+	chmod +x scripts/mcp-up.sh
+	./scripts/mcp-up.sh
+
+mcp-down: prod-down
+
 prod-up:
-	@test -f .env.prod || (echo "Run: cp .env.prod.example .env.prod" && exit 1)
+	@test -f .env.prod || (echo "Run: make mcp-up   # or: cp .env.prod.example .env.prod" && exit 1)
 	$(PROD_COMPOSE) up -d --build mcp
 
 prod-down:

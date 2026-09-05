@@ -4,21 +4,70 @@ on:
   pull_request:
     branches: [master, develop]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   php:
+    name: PHP plugin
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Build PHP image
         run: docker compose build php
+
       - name: Install and CI
-        run: docker compose run --rm php composer install && docker compose run --rm php composer ci
+        run: |
+          docker compose run --rm --no-deps php composer install --no-interaction
+          docker compose run --rm --no-deps php composer ci
 
   mcp:
+    name: MCP server
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: MCP CI
         working-directory: packages/mcp-server
         run: |
-          docker run --rm -v "$PWD:/app" -w /app node:24-bookworm-slim sh -c "npm install && npm run ci"
+          docker run --rm -v "$PWD:/app" -w /app node:24-bookworm-slim \
+            sh -c "npm ci && npm run ci"
+
+  secrets:
+    name: Security (Secrets)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Gitleaks OSS CLI
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb \
+            detect --source=/repo --verbose --redact --config=/repo/.gitleaks.toml
+
+  coverage-upload:
+    name: Coverage upload
+    needs: [php, mcp, secrets]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Quality gate passed
+        run: echo "PHP plugin, MCP server, and secret scan succeeded."
