@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Navigation menus on WordPress 7.x**: `wp_get_nav_menu_locations()` / `wp_set_nav_menu_locations()` were removed; the plugin now uses the 7.x `get_nav_menu_locations()` API with a 6.x fallback.
+- Force transitive `qs` to `^6.16.0` via npm `overrides` (Dependabot medium advisory / `npm audit`).
 
 ## [1.4.5] - 2026-09-01
 
