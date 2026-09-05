@@ -26,6 +26,7 @@ services:
     volumes:
       - wordpress-data:/var/www/html
       - ./packages/wordpress-plugin:/var/www/html/wp-content/plugins/wordpress-chatgpt
+      - ./docker/wordpress/mu-plugins:/var/www/html/wp-content/mu-plugins:ro
     depends_on:
       db:
         condition: service_healthy
@@ -71,9 +72,9 @@ services:
       context: ./packages/wordpress-plugin
       dockerfile: Dockerfile
     image: jooservices/wordpress-mcp-plugin:php83
-    working_dir: /app
+    working_dir: /app/packages/wordpress-plugin
     volumes:
-      - ./packages/wordpress-plugin:/app
+      - .:/app
     user: "${DOCKER_UID:-0}:${DOCKER_GID:-0}"
     tty: true
 
@@ -97,11 +98,29 @@ services:
       WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
       MCP_URL: http://mcp:3000
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
-    command: sh -c "npm install && npm test"
+    command: sh -c "npm ci && npm test -- tests/integration.test.ts"
     depends_on:
       mcp:
         condition: service_started
     profiles: ["integration"]
+
+  e2e:
+    image: node:24-bookworm-slim
+    working_dir: /app/packages/mcp-server
+    volumes:
+      - .:/app
+      - mcp-node-modules:/app/packages/mcp-server/node_modules
+    environment:
+      RUN_E2E: "1"
+      MCP_URL: http://mcp:3000
+      MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
+      WORDPRESS_SITE_ID: ${WORDPRESS_SITE_ID:-default}
+      NODE_OPTIONS: --max-old-space-size=512
+    command: sh -c "if [ ! -x node_modules/.bin/vitest ]; then npm ci; fi && npm test -- tests/e2e.test.ts"
+    depends_on:
+      mcp:
+        condition: service_started
+    profiles: ["e2e"]
 
 volumes:
   db-data:

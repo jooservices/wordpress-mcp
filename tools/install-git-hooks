@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+if [ ! -x packages/wordpress-plugin/vendor/bin/captainhook ]; then
+  docker compose build php
+  docker compose run --rm --no-deps php composer install --no-interaction --no-scripts
+fi
+
+docker compose run --rm --no-deps -w /app php \
+  packages/wordpress-plugin/vendor/bin/captainhook install --force --skip-existing \
+  --configuration=/app/captainhook.json \
+  --bootstrap=packages/wordpress-plugin/vendor/autoload.php
+
+for hook in .git/hooks/*; do
+  if [ -f "$hook" ] && grep -q 'vendor/bin/captainhook\|packages/wordpress-plugin/vendor/bin/captainhook' "$hook" 2>/dev/null; then
+    sed -i '' 's|packages/wordpress-plugin/vendor/bin/captainhook|tools/run-captainhook|g' "$hook" 2>/dev/null || true
+    sed -i '' 's|vendor/bin/captainhook|tools/run-captainhook|g' "$hook" 2>/dev/null || true
+  fi
+done
+
+echo "Git hooks installed (CaptainHook via Docker: tools/run-captainhook)"

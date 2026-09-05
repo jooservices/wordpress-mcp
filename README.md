@@ -1,6 +1,9 @@
 # jooservices/wordpress-mcp
 
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jooservices/wordpress-mcp/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp)
+[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_wordpress-mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_wordpress-mcp)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/wordpress-mcp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/wordpress-mcp)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
 [![Release](https://img.shields.io/badge/version-1.4.5-blue.svg)](CHANGELOG.md)
@@ -151,9 +154,11 @@ Resources share the DTO whitelists and per-tool policy: disabling `wordpress_get
 
 ```bash
 make install       # composer + npm deps
+tools/install-git-hooks
 make ci            # lint + tests (Docker)
 make test          # unit tests
 make integration   # MCP → WordPress (stack must be up)
+make e2e           # full stack + all 45 MCP tools
 make down          # stop dev stack
 make plugin-release
 ```
@@ -167,7 +172,7 @@ All commands run in Docker per JOOservices workspace rules.
 | `master` | Production releases; tags from here |
 | `develop` | Integration; feature PRs target here |
 
-PRs require green CI: Pint, PHPCS, PHPStan, PHPUnit (plugin) + TypeScript build + Vitest (MCP server).
+PRs require green CI: Pint, PHPCS, PHPStan, PHPUnit (plugin) + TypeScript build + Vitest (MCP server), plus commitlint and semantic PR title checks.
 
 See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -188,6 +193,8 @@ See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Community
 
 - [Contributing](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Governance](GOVERNANCE.md)
 - [Security policy](SECURITY.md)
 - [Support](SUPPORT.md)
 
