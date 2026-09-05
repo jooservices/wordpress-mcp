@@ -82,7 +82,8 @@ Connect ChatGPT: see [docs/CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md).
 
 ## Production
 
-Interactive Docker start (asks URL + token per site — no JSON):
+Interactive Docker start (asks URL + token per site — no JSON).
+Optional publish: **local** / **HTTPS (Caddy)** / **ngrok tunnel**:
 
 ```bash
 make mcp-up           # prompts → writes .env.prod → starts MCP
