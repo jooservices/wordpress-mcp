@@ -208,7 +208,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   const server = new McpServer(
     {
       name: "wordpress-mcp",
-      version: "1.4.4",
+      version: "1.4.5",
     },
     {
       instructions: serverInstructions(registry),
