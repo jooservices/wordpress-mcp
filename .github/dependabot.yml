@@ -14,6 +14,10 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # WP stubs major tracks WordPress major; keep on ^6 while plugin supports 6.4+.
+    ignore:
+      - dependency-name: "php-stubs/wordpress-stubs"
+        update-types: ["version-update:semver-major"]
     groups:
       dev-dependencies:
         dependency-type: "development"
@@ -34,6 +38,22 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
+    # Majors need dedicated migration PRs (express 5, zod 4, TS 7, Vitest 4, etc.).
+    ignore:
+      - dependency-name: "express"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "zod"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "pkce-challenge"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@modelcontextprotocol/sdk"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
