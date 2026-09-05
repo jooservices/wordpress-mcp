@@ -22,6 +22,7 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 | `ci.yml` | `PHP plugin` · `MCP server` · `Security (Secrets)` · **`Coverage upload`** | Quality + secret scan; final gate needs the three jobs |
 | `commitlint.yml` | `Validate commit messages` | Conventional Commits on every PR commit |
 | `semantic-pr.yml` | `Validate PR Title` | PR title type + uppercase subject |
+| `scorecard.yml` | Scorecard Analysis | OpenSSF Scorecard (push to `master` / weekly) |
 
 `Coverage upload` is the merge-blocking CI leaf (same pattern as `dto` / `client`). It does not upload Codecov yet; it only succeeds when PHP, MCP, and Gitleaks jobs succeed.
 

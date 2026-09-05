@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Docker E2E suite (`make e2e` / `scripts/e2e.sh`): brings up WordPress + plugin + MCP, then Vitest `tests/e2e.test.ts` calls **all 45** MCP tools over Streamable HTTP.
 - Compose mu-plugin helpers for Docker (skip public-URL verify; raise rate limit for E2E).
+- README badges aligned with `dto` / `client` (CI, Codecov, Sonar, OpenSSF Scorecard, PHP, Node, version, License); add OpenSSF Scorecard workflow + `sonar-project.properties`.
 
 ### Fixed
 
