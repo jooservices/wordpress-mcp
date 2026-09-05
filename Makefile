@@ -1,4 +1,4 @@
-.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e logs plugin-release prod-up prod-https prod-tunnel prod-down prod-logs
+.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e logs plugin-release mcp-up mcp-down prod-up prod-https prod-tunnel prod-down prod-logs
 
 DOCKER_COMPOSE ?= docker compose
 PHP = $(DOCKER_COMPOSE) run --rm php
@@ -60,8 +60,15 @@ plugin-release:
 	chmod +x scripts/build-plugin-release.sh
 	./scripts/build-plugin-release.sh
 
+# Interactive: prompts for site URL + token (repeat for more sites), writes .env.prod, starts MCP.
+mcp-up:
+	chmod +x scripts/mcp-up.sh
+	./scripts/mcp-up.sh
+
+mcp-down: prod-down
+
 prod-up:
-	@test -f .env.prod || (echo "Run: cp .env.prod.example .env.prod" && exit 1)
+	@test -f .env.prod || (echo "Run: make mcp-up   # or: cp .env.prod.example .env.prod" && exit 1)
 	$(PROD_COMPOSE) up -d --build mcp
 
 prod-down:

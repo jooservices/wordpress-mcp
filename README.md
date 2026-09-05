@@ -82,7 +82,14 @@ Connect ChatGPT: see [docs/CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md).
 
 ## Production
 
-One-command Docker deploy:
+Interactive Docker start (asks URL + token per site — no JSON):
+
+```bash
+make mcp-up           # prompts → writes .env.prod → starts MCP
+make mcp-down         # stop
+```
+
+Or edit `.env.prod` yourself, then:
 
 ```bash
 cp .env.prod.example .env.prod
