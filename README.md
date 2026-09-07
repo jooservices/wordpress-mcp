@@ -1,12 +1,11 @@
 # jooservices/wordpress-mcp
 
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/jooservices/wordpress-mcp/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp)
-[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_wordpress-mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_wordpress-mcp)
+[![Coverage (develop)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/wordpress-mcp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/wordpress-mcp)
 [![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.4.6-blue.svg)](CHANGELOG.md)
+[![GitHub Release](https://img.shields.io/github/v/release/jooservices/wordpress-mcp?display_name=tag)](https://github.com/jooservices/wordpress-mcp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
