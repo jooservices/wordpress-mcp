@@ -38,6 +38,7 @@
         "lint:all": ["@lint:pint", "@lint:phpcs", "@lint:phpstan"],
         "lint:fix": ["@lint:pint:fix"],
         "test": "phpunit --no-coverage",
+        "test:live": "phpunit --no-coverage --configuration phpunit.live.xml",
         "test:coverage": "phpunit --coverage-text --coverage-clover build/coverage.xml && php tools/ensure-coverage.php build/coverage.xml 15",
         "ci": ["@lint:all", "@test:coverage"]
     },

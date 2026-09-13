@@ -1,0 +1,33 @@
+name: Plugin E2E
+
+on:
+  pull_request:
+    branches: [master, develop]
+  workflow_dispatch:
+  schedule:
+    - cron: "47 3 * * *"
+
+concurrency:
+  group: plugin-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-e2e:
+    name: WordPress plugin REST
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Plugin live REST
+        run: make plugin-e2e
+
+      - name: Compose logs on failure
+        if: failure()
+        run: docker compose logs --tail=120 wordpress wp-init

@@ -40,11 +40,14 @@ docs: Update ChatGPT connector guide
 
 ```bash
 make ci
-make e2e    # Docker: WordPress + plugin + MCP, all 45 tools
+make e2e         # optional local smoke (45 tools)
+make e2e-full    # optional local/nightly full MCP matrix
+make plugin-e2e  # live WordPress plugin REST (no MCP)
 ```
 
 `make ci` runs Pint, PHPCS, PHPStan, PHPMD, PHPUnit (plugin) and TypeScript build + Vitest (MCP server).
-`make e2e` starts the Compose stack and runs `packages/mcp-server/tests/e2e.test.ts`.
+`make e2e` starts Compose and runs `packages/mcp-server/tests/e2e/smoke.test.ts`.
+`make e2e-full` also runs content, media, recovery, resources, and site-ops suites. Full E2E is nightly / manual, not a PR required check.
 
 **Never bypass hooks with `--no-verify`.**
 
