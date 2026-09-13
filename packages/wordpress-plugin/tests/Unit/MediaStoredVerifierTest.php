@@ -83,6 +83,23 @@ final class MediaStoredVerifierTest extends TestCase
     }
 
     #[Test]
+    public function it_accepts_attachments_whose_metadata_has_no_intermediate_sizes(): void
+    {
+        add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);
+        $GLOBALS['wp_test_attachment_metadata'][501] = [
+            'width' => 1,
+            'height' => 1,
+            'sizes' => [],
+        ];
+
+        $result = MediaStoredVerifier::verifyAttachment(501, hash('sha256', $this->pngBytes));
+
+        self::assertNull($result['step']);
+        self::assertTrue($result['verification']['passed']);
+        self::assertTrue($result['verification']['metadata_generated']);
+    }
+
+    #[Test]
     public function it_detects_checksum_mismatch_after_file_mutation(): void
     {
         add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);

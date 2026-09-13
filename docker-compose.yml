@@ -17,12 +17,16 @@ services:
   wordpress:
     image: wordpress:php8.3-apache
     ports:
-      - "8080:80"
+      - "${WORDPRESS_HOST_PORT:-8080}:80"
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wordpress}
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
+      # Default skip keeps `make up` usable when siteurl is localhost:8080 (PHP cannot fetch that).
+      # `make e2e` / `make e2e-full` set E2E_SKIP_PUBLIC_URL=0 and WP_INTERNAL_URL=http://wordpress.
+      E2E_SKIP_PUBLIC_URL: ${E2E_SKIP_PUBLIC_URL:-1}
+      WORDPRESS_CONFIG_EXTRA: ${WORDPRESS_CONFIG_EXTRA:-}
     volumes:
       - wordpress-data:/var/www/html
       - ./packages/wordpress-plugin:/var/www/html/wp-content/plugins/wordpress-chatgpt
@@ -40,6 +44,8 @@ services:
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
       WP_DEV_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
+      WP_INTERNAL_URL: ${WP_INTERNAL_URL:-http://localhost:8080}
+      DISABLE_WP_CRON: ${DISABLE_WP_CRON:-}
     volumes:
       - wordpress-data:/var/www/html
       - ./packages/wordpress-plugin:/var/www/html/wp-content/plugins/wordpress-chatgpt
@@ -112,11 +118,12 @@ services:
       - mcp-node-modules:/app/packages/mcp-server/node_modules
     environment:
       RUN_E2E: "1"
+      RUN_E2E_FULL: ${RUN_E2E_FULL:-}
       MCP_URL: http://mcp:3000
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
       WORDPRESS_SITE_ID: ${WORDPRESS_SITE_ID:-default}
       NODE_OPTIONS: --max-old-space-size=512
-    command: sh -c "if [ ! -x node_modules/.bin/vitest ]; then npm ci; fi && npm test -- tests/e2e.test.ts"
+    command: sh -c "if [ ! -x node_modules/.bin/vitest ]; then npm ci; fi && npm test -- tests/e2e --fileParallelism=false"
     depends_on:
       mcp:
         condition: service_started

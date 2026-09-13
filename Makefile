@@ -1,4 +1,4 @@
-.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e logs plugin-release mcp-up mcp-down prod-up prod-https prod-tunnel prod-down prod-logs
+.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e e2e-full plugin-e2e logs plugin-release mcp-up mcp-down prod-up prod-https prod-tunnel prod-down prod-logs
 
 DOCKER_COMPOSE ?= docker compose
 PHP = $(DOCKER_COMPOSE) run --rm php
@@ -46,6 +46,14 @@ integration:
 e2e:
 	chmod +x scripts/e2e.sh
 	./scripts/e2e.sh
+
+e2e-full:
+	chmod +x scripts/e2e.sh
+	E2E_FULL=1 ./scripts/e2e.sh
+
+plugin-e2e:
+	chmod +x scripts/plugin-e2e.sh
+	./scripts/plugin-e2e.sh
 
 shell-php:
 	$(DOCKER_COMPOSE) run --rm php bash

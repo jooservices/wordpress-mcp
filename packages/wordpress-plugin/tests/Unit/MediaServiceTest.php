@@ -221,6 +221,10 @@ final class MediaServiceTest extends TestCase
 
         $cached = $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'];
         self::assertSame([], $cached['orphan_files']['items']);
+
+        $second = $service->adoptOrphan(['path' => $relative]);
+        self::assertNull($second['error'], (string) $second['error_step']);
+        self::assertSame($result['media']['id'], $second['media']['id']);
     }
 
     private function registerPreFixScaledAttachment(int $id, string $scaledRelative, ?string $originalImageBasename): void

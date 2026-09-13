@@ -26,6 +26,7 @@ use JOOservices\WordPressMcp\Services\RedirectService;
 use JOOservices\WordPressMcp\Services\TaxonomyService;
 use JOOservices\WordPressMcp\Services\ThemeService;
 use JOOservices\WordPressMcp\Services\UserService;
+use JOOservices\WordPressMcp\Support\ContentMediaIds;
 use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Error;
@@ -1280,6 +1281,16 @@ final class RestRegistrar
 
         $params = $request->get_json_params();
         $payload = is_array($params) ? $params : [];
+        if ($payload === []) {
+            $decoded = json_decode($request->get_body(), true);
+            $payload = is_array($decoded) ? $decoded : [];
+        }
+        $pathLooksLikeRoute = isset($payload['path'])
+            && is_string($payload['path'])
+            && str_starts_with($payload['path'], '/');
+        if (isset($payload['file_path']) && (! isset($payload['path']) || $pathLooksLikeRoute)) {
+            $payload['path'] = $payload['file_path'];
+        }
         $result = (new MediaService())->adoptOrphan($payload);
         $audit = new AuditLogger();
 
@@ -2185,17 +2196,7 @@ final class RestRegistrar
             return true;
         }
 
-        $matches = [];
-        preg_match_all('/(?:wp-image-|data-id=["\']|"id"\s*:\s*|ids=["\'])(\d+(?:\s*,\s*\d+)*)/', $payload['content'], $matches);
-
-        $ids = [];
-        foreach ($matches[1] as $match) {
-            foreach (preg_split('/\s*,\s*/', $match) ?: [] as $id) {
-                $ids[(int) $id] = true;
-            }
-        }
-
-        foreach (array_keys($ids) as $id) {
+        foreach (ContentMediaIds::fromContent($payload['content']) as $id) {
             if (! $this->canEmbedMedia($connection, $id)) {
                 return false;
             }

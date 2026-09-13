@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `make e2e-full` plus split Vitest suites under `packages/mcp-server/tests/e2e/` (content/featured, media verify including large JPEG, orphan adopt, resources, site-ops). Nightly / `workflow_dispatch` workflow `.github/workflows/e2e.yml` (not a PR required check).
+- `make plugin-e2e` and `.github/workflows/plugin-e2e.yml`: live WordPress plugin REST suite (PHPUnit `tests/Live`) against Docker WordPress with no MCP server.
+- E2E fixtures and WP-CLI seed for an on-disk orphan file plus a published `wp-image` broken reference.
+
+### Fixed
+
+- Content updates no longer deny Gutenberg blocks whose JSON `"id"` is not a media attachment. Embed checks use `wp-image-*`, `wp:image` / `wp:gallery`, gallery `ids`, and `data-id` only.
+- Media verification accepts attachments with empty intermediate `sizes` (tiny images).
+- Orphan adopt confines files with `realpath()` on the uploads basedir (symlink-safe) and normalizes orphan paths. Re-adopting a path already registered (after the orphan cache drops it) returns the existing attachment instead of `pre_validate.not_orphan`.
+- Orphan scanner treats WordPress `original_image` as a known path so scaled originals are not false orphans.
+- Media-orphan WP-Cron is scheduled a day out, not immediately, so the first REST request cannot overwrite a just-written scan cache.
+
+### Changed
+
+- E2E smoke (`make e2e`) uses compose DNS `http://wordpress` and leaves public-URL verification on (`E2E_SKIP_PUBLIC_URL=0`). `make up` still defaults to `localhost:8080` and skips that verify so the host admin UI works.
+- Docker mu-plugin skips public-URL verify only when `E2E_SKIP_PUBLIC_URL=1`.
+
 ## [1.4.6] - 2026-09-05
 
 ### Changed

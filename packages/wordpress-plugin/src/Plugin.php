@@ -36,7 +36,7 @@ final class Plugin
         }
 
         if (! wp_next_scheduled(self::MEDIA_SCAN_CRON_HOOK)) {
-            wp_schedule_event(time(), 'daily', self::MEDIA_SCAN_CRON_HOOK);
+            wp_schedule_event(time() + 86400, 'daily', self::MEDIA_SCAN_CRON_HOOK);
         }
     }
 
@@ -63,7 +63,7 @@ final class Plugin
     public static function ensureMediaScanScheduled(): void
     {
         if (! wp_next_scheduled(self::MEDIA_SCAN_CRON_HOOK)) {
-            wp_schedule_event(time(), 'daily', self::MEDIA_SCAN_CRON_HOOK);
+            wp_schedule_event(time() + 86400, 'daily', self::MEDIA_SCAN_CRON_HOOK);
         }
     }
 
