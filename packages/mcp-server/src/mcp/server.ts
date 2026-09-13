@@ -1207,7 +1207,12 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       dto: { kind: "media" },
     },
     async ({ client, siteId, args }: ToolContext<AdoptOrphanMediaArgs>) => {
-      const item = await client.post<MediaDto>("/media/orphans/adopt", wpArgs(args));
+      const { path: orphanPath, ...rest } = wpArgs(args);
+      const item = await client.post<MediaDto>("/media/orphans/adopt", {
+        ...rest,
+        path: orphanPath,
+        file_path: orphanPath,
+      });
       const verification = item.verification;
       const passed = verification?.passed === true;
       return {

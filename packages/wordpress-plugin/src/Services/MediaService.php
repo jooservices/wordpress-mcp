@@ -241,14 +241,44 @@ final class MediaService
         $match = $this->resolveOrphanMatch($path, $url);
 
         if ($match === null) {
-            return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.not_orphan');
+            $lookupPath = self::normalizeOrphanPath($path);
+            $existingId = $lookupPath !== ''
+                ? ($this->findAttachmentBySourcePath($lookupPath)
+                    ?? $this->findAttachmentByScaledVariant($lookupPath)
+                    ?? $this->findAttachmentByAttachedFile($lookupPath))
+                : null;
+
+            if ($existingId === null) {
+                return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.not_orphan');
+            }
+
+            $media = $this->normalize($existingId);
+
+            if ($media === null) {
+                return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.not_orphan');
+            }
+
+            $media['adopted_from'] = $lookupPath;
+            $media['verification'] = MediaVerificationResult::build([
+                'passed' => true,
+                'featured_set' => false,
+            ]);
+
+            return [
+                'media' => $media,
+                'verification' => $media['verification'],
+                'error' => null,
+                'error_step' => null,
+            ];
         }
 
         $relativePath = $match['path'];
         $basedir = UploadDirectory::basedir();
-        $full = $basedir !== null ? realpath($basedir . '/' . $relativePath) : false;
+        $basedirReal = $basedir !== null ? realpath($basedir) : false;
+        $full = $basedirReal !== false ? realpath($basedirReal . '/' . $relativePath) : false;
+        $prefix = $basedirReal !== false ? rtrim($basedirReal, '/') . '/' : '';
 
-        if ($basedir === null || $full === false || ! str_starts_with($full, $basedir . '/') || ! is_file($full)) {
+        if ($basedirReal === false || $full === false || $prefix === '/' || ! str_starts_with($full, $prefix) || ! is_file($full)) {
             return $this->uploadFailure(ErrorCodes::MEDIA_NOT_FOUND, 'pre_validate.missing_file');
         }
 
@@ -675,17 +705,27 @@ final class MediaService
         $cached = (new MediaOrphanScanner())->cachedResult();
         $items = $cached['orphan_files']['items'] ?? [];
 
+        $path = self::normalizeOrphanPath($path);
+
         foreach ($items as $item) {
-            if ($path !== '' && $item['path'] === $path) {
+            $itemPath = self::normalizeOrphanPath((string) ($item['path'] ?? ''));
+            $itemUrl = (string) ($item['url'] ?? '');
+
+            if ($path !== '' && $itemPath !== '' && $itemPath === $path) {
                 return $item;
             }
 
-            if ($url !== '' && ($item['url'] ?? null) === $url) {
+            if ($url !== '' && $itemUrl !== '' && $itemUrl === $url) {
                 return $item;
             }
         }
 
         return null;
+    }
+
+    private static function normalizeOrphanPath(string $path): string
+    {
+        return ltrim(str_replace('\\', '/', $path), '/');
     }
 
     /**
