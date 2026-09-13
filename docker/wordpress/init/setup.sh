@@ -11,15 +11,26 @@ done
 
 cd /var/www/html
 
+WP_URL="${WP_INTERNAL_URL:-http://localhost:8080}"
+
 if ! wp core is-installed 2>/dev/null; then
-  echo "Installing WordPress..."
+  echo "Installing WordPress at ${WP_URL}..."
   wp core install \
-    --url="http://localhost:8080" \
+    --url="${WP_URL}" \
     --title="WordPress MCP Dev" \
     --admin_user="admin" \
     --admin_password="admin123!" \
     --admin_email="admin@example.com" \
     --skip-email
+fi
+
+echo "Setting home/siteurl to ${WP_URL}..."
+wp option update home "${WP_URL}"
+wp option update siteurl "${WP_URL}"
+
+if [ "${DISABLE_WP_CRON:-}" = "1" ] || [ "${DISABLE_WP_CRON:-}" = "true" ]; then
+  echo "Disabling WP-Cron..."
+  wp config set DISABLE_WP_CRON true --raw || true
 fi
 
 echo "Installing plugin dependencies..."

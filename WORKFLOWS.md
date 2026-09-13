@@ -20,9 +20,11 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 | Workflow | Check name | Role |
 | --- | --- | --- |
 | `ci.yml` | `PHP plugin` · `MCP server` · `Security (Secrets)` · **`Coverage upload`** | Quality + secret scan; final gate needs the three jobs |
+| `e2e.yml` | `Docker WordPress + MCP` | Nightly + `workflow_dispatch` full Compose E2E. **Not** a PR required check. |
+| `plugin-e2e.yml` | `WordPress plugin REST` | Live plugin REST against Docker WordPress (no MCP). PR + nightly + `workflow_dispatch`. **Not** in the `Coverage upload` required chain. |
 | `commitlint.yml` | `Validate commit messages` | Conventional Commits on every PR commit |
 | `semantic-pr.yml` | `Validate PR Title` | PR title type + uppercase subject |
-| `scorecard.yml` | Scorecard Analysis | OpenSSF Scorecard (push to `master` / weekly) |
+| `scorecard.yml` | Push to `develop`; weekly; manual | OpenSSF Scorecard |
 
 `Coverage upload` is the merge-blocking CI leaf (same pattern as `dto` / `client`). It does not upload Codecov yet; it only succeeds when PHP, MCP, and Gitleaks jobs succeed.
 
@@ -33,9 +35,13 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 | `make ci` | Full quality gate |
 | `make test` | Unit tests only |
 | `make integration` | Live stack integration (requires `make up`) |
-| `make e2e` | Full Docker E2E: WordPress + plugin + MCP, all 45 tools |
+| `make e2e` | Docker WP + plugin + MCP smoke (all 45 tools). Sets `WP_INTERNAL_URL=http://wordpress` and `E2E_SKIP_PUBLIC_URL=0`. |
+| `make e2e-full` | Smoke plus content/featured, media verify (including large JPEG), orphan adopt, resources, site-ops. Nightly / `workflow_dispatch` in `.github/workflows/e2e.yml`. Not a PR required check. |
+| `make plugin-e2e` | Docker WordPress + plugin only (no MCP). PHPUnit live HTTP against `/wp-json/chatgpt-connector/v1/`. |
 | `make plugin-release` | Build `build/wordpress-chatgpt-<version>.zip` (version read from the plugin header) |
 | `tools/install-git-hooks` | Install CaptainHook hooks (Docker) |
+
+`make up` keeps `http://localhost:8080` and skips public-URL verify so the host admin UI works. E2E does **not** skip that verify.
 
 ## Release (v1.0.0+)
 
