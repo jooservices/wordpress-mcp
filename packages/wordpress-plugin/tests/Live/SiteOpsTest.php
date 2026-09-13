@@ -51,7 +51,8 @@ final class SiteOpsTest extends LiveTestCase
             ]);
             self::assertContains($patched['status'], [200, 201]);
         } finally {
-            $this->api('DELETE', '/content/' . $id . '?force=1');
+            $deleted = $this->api('DELETE', '/content/' . $id . '?force=1');
+            self::assertSame(200, $deleted['status']);
         }
     }
 
@@ -80,8 +81,10 @@ final class SiteOpsTest extends LiveTestCase
             self::assertSame(200, $redirects['status']);
             $this->api('GET', '/redirects/not-found');
         } finally {
-            $this->api('DELETE', '/navigation/menus/' . $menuId);
-            $this->api('DELETE', '/redirects/' . rawurlencode(ltrim($source, '/')));
+            $deletedMenu = $this->api('DELETE', '/navigation/menus/' . $menuId);
+            self::assertSame(200, $deletedMenu['status']);
+            $deletedRedirect = $this->api('DELETE', '/redirects/' . rawurlencode(ltrim($source, '/')));
+            self::assertContains($deletedRedirect['status'], [200, 204]);
         }
     }
 
