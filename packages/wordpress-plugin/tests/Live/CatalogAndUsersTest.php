@@ -8,6 +8,18 @@ use PHPUnit\Framework\Attributes\Test;
 
 final class CatalogAndUsersTest extends LiveTestCase
 {
+    /** @var list<int> */
+    private array $userIds = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->userIds as $id) {
+            $this->api('DELETE', '/users/' . $id);
+        }
+
+        parent::tearDown();
+    }
+
     #[Test]
     public function it_lists_terms_comments_plugins_and_themes(): void
     {
@@ -58,6 +70,7 @@ final class CatalogAndUsersTest extends LiveTestCase
         ]);
         self::assertContains($created['status'], [200, 201], (string) json_encode($created['body']));
         $id = (int) $created['body']['id'];
+        $this->userIds[] = $id;
 
         $updated = $this->api('PATCH', '/users/' . $id, [
             'display_name' => 'E2E ' . $login,
@@ -69,5 +82,6 @@ final class CatalogAndUsersTest extends LiveTestCase
 
         $deleted = $this->api('DELETE', '/users/' . $id);
         self::assertSame(200, $deleted['status']);
+        $this->userIds = array_values(array_filter($this->userIds, static fn(int $kept): bool => $kept !== $id));
     }
 }

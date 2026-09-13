@@ -77,10 +77,13 @@ describe.skipIf(!runE2EFull)("e2e content + featured media", () => {
 
   it("does not deny content whose Gutenberg JSON id is not an attachment", async () => {
     expect(postId).toBeGreaterThan(0);
+    const missingId = 999_999_999;
+    const missing = await session.call("wordpress_get_media", { id: missingId });
+    expect(missing.isError ?? false).toBe(true);
 
     const updated = await session.expectSuccess("wordpress_update_content", {
       id: postId,
-      content: `<!-- wp:heading {"id":12,"level":2} --><h2>Heading</h2><!-- /wp:heading -->`,
+      content: `<!-- wp:heading {"id":${missingId},"level":2} --><h2>Heading</h2><!-- /wp:heading -->`,
     });
     expect(updated.isError ?? false).toBe(false);
   });

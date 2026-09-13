@@ -38,10 +38,10 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 | `make e2e` | Docker WP + plugin + MCP smoke (all 45 tools). Sets `WP_INTERNAL_URL=http://wordpress` and `E2E_SKIP_PUBLIC_URL=0`. |
 | `make e2e-full` | Smoke plus content/featured, media verify (including large JPEG), orphan adopt, resources, site-ops. Nightly / `workflow_dispatch` in `.github/workflows/e2e.yml`. Not a PR required check. |
 | `make plugin-e2e` | Docker WordPress + plugin only (no MCP). PHPUnit live HTTP against `/wp-json/chatgpt-connector/v1/`. |
-
-`make up` keeps `http://localhost:8080` and skips public-URL verify so the host admin UI works. E2E does **not** skip that verify. Media suites may fail on current `develop` until upload/adopt/featured product fixes land — that is intentional.
 | `make plugin-release` | Build `build/wordpress-chatgpt-<version>.zip` (version read from the plugin header) |
 | `tools/install-git-hooks` | Install CaptainHook hooks (Docker) |
+
+`make up` keeps `http://localhost:8080` and skips public-URL verify so the host admin UI works. E2E does **not** skip that verify.
 
 ## Release (v1.0.0+)
 

@@ -242,34 +242,23 @@ final class MediaService
 
         if ($match === null) {
             $lookupPath = self::normalizeOrphanPath($path);
+            // Only our adoption markers — not a guess of any `_wp_attached_file`.
             $existingId = $lookupPath !== ''
                 ? ($this->findAttachmentBySourcePath($lookupPath)
-                    ?? $this->findAttachmentByScaledVariant($lookupPath)
-                    ?? $this->findAttachmentByAttachedFile($lookupPath))
+                    ?? $this->findAttachmentByScaledVariant($lookupPath))
                 : null;
 
             if ($existingId === null) {
                 return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.not_orphan');
             }
 
-            $media = $this->normalize($existingId);
+            $title = trim(sanitize_text_field((string) ($data['title'] ?? '')));
 
-            if ($media === null) {
-                return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.not_orphan');
+            if ($title === '') {
+                $title = get_the_title($existingId) ?: sanitize_file_name((string) pathinfo(basename($lookupPath), PATHINFO_FILENAME));
             }
 
-            $media['adopted_from'] = $lookupPath;
-            $media['verification'] = MediaVerificationResult::build([
-                'passed' => true,
-                'featured_set' => false,
-            ]);
-
-            return [
-                'media' => $media,
-                'verification' => $media['verification'],
-                'error' => null,
-                'error_step' => null,
-            ];
+            return $this->finalizeAdoption($existingId, $lookupPath, $data, $title, false);
         }
 
         $relativePath = $match['path'];
@@ -377,6 +366,20 @@ final class MediaService
             $attachmentId = $existingId;
         }
 
+        return $this->finalizeAdoption($attachmentId, $relativePath, $data, $title, $isNewAdoption);
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function finalizeAdoption(
+        int $attachmentId,
+        string $relativePath,
+        array $data,
+        string $title,
+        bool $isNewAdoption,
+    ): array {
         $stored = MediaStoredVerifier::verifyAttachment($attachmentId);
 
         if ($stored['step'] !== null) {
@@ -390,15 +393,8 @@ final class MediaService
         $naming = ['file_name' => basename($relativePath), 'slug_base' => '', 'image_type' => null, 'attachment_title' => $title];
         $metadataFields = $this->applyMetadata($attachmentId, $data, $naming);
         $metadataCheck = MediaStoredVerifier::verifyMetadata($attachmentId, $metadataFields);
-
         $verification = $stored['verification'];
 
-        // Title/alt/caption/description are text formatting, not file
-        // integrity — WordPress core can legitimately rewrite them on save
-        // (e.g. wp_encode_emoji() converts emoji to HTML entities on legacy
-        // utf8 DB columns), which would otherwise fail this check for a file
-        // that decoded, hashed, and verified perfectly. Record the mismatch
-        // instead of discarding an already-verified-good attachment over it.
         if ($metadataCheck['step'] !== null) {
             $verification['metadata_mismatch'] = $metadataCheck['verification']['metadata_mismatch'] ?? null;
         }
@@ -420,10 +416,6 @@ final class MediaService
         $verification['featured_set'] = $featuredSet['set'];
         $verification['passed'] = true;
         MediaStoredVerifier::markVerified($attachmentId);
-
-        // Whether this call inserted a new attachment or resolved to an
-        // existing one, the orphan-scan cache should stop offering this
-        // path — it's mapped to an attachment either way.
         (new MediaOrphanScanner())->forgetOrphanFile($relativePath);
 
         $media = $this->normalize($attachmentId);

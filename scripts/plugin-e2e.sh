@@ -45,7 +45,8 @@ until $COMPOSE run --rm --no-deps php php -r "
   'timeout' => 5,
 ]]);
 \$raw = @file_get_contents('http://wordpress/wp-json/chatgpt-connector/v1/site', false, \$ctx);
-exit(\$raw === false ? 1 : 0);
+\$status = \$http_response_header[0] ?? '';
+exit(\$raw === false || ! preg_match('/\\s2\\d\\d\\s/', \$status) ? 1 : 0);
 "; do
   if (( SECONDS >= deadline )); then
     echo "WordPress plugin REST timed out"

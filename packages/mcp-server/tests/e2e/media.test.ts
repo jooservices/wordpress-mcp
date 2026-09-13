@@ -82,16 +82,10 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
       | { passed?: boolean; failed_step?: string | null; metadata_generated?: boolean }
       | undefined;
 
-    if (!(result.isError ?? false) && Number(result.structuredContent?.id) > 0) {
-      createdIds.push(Number(result.structuredContent?.id));
-    }
-
-    // Tiny images often have empty `sizes`. Passing is acceptable; failing on
-    // post_validate.metadata documents the current product bug.
-    if (result.isError) {
-      expect(String(verification?.failed_step ?? textOf(result))).toMatch(/metadata|sizes|public_url|decode/);
-    } else {
-      expect(verification?.passed).toBe(true);
-    }
+    expect(result.isError ?? false, `tiny upload failed: ${textOf(result)}`).toBe(false);
+    const id = Number(result.structuredContent?.id);
+    expect(id).toBeGreaterThan(0);
+    createdIds.push(id);
+    expect(verification?.passed).toBe(true);
   });
 });

@@ -179,13 +179,13 @@ describe.skipIf(!runE2E)("e2e smoke: every MCP tool against live WordPress", () 
       source: `/e2e-${stamp}`,
       destination: "https://example.com/e2e",
     });
-    await session.call("wordpress_manage_redirect", {
+    await session.expectSuccess("wordpress_manage_redirect", {
       action: "upsert",
       source: `/e2e-${stamp}`,
       destination: "https://example.com/e2e",
       confirm: true,
     });
-    await session.call("wordpress_manage_redirect", {
+    await session.expectSuccess("wordpress_manage_redirect", {
       action: "delete",
       source: `/e2e-${stamp}`,
       confirm: true,

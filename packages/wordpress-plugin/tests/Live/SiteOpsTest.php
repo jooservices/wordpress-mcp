@@ -16,11 +16,13 @@ final class SiteOpsTest extends LiveTestCase
         $original = (string) ($current['body']['blogdescription'] ?? '');
         $next = 'E2E ' . $this->faker->unique()->numerify('tag####');
 
-        $updated = $this->api('PATCH', '/settings', ['blogdescription' => $next]);
-        self::assertSame(200, $updated['status'], (string) json_encode($updated['body']));
-
-        $restored = $this->api('PATCH', '/settings', ['blogdescription' => $original]);
-        self::assertSame(200, $restored['status']);
+        try {
+            $updated = $this->api('PATCH', '/settings', ['blogdescription' => $next]);
+            self::assertSame(200, $updated['status'], (string) json_encode($updated['body']));
+        } finally {
+            $restored = $this->api('PATCH', '/settings', ['blogdescription' => $original]);
+            self::assertSame(200, $restored['status']);
+        }
     }
 
     #[Test]
@@ -40,15 +42,17 @@ final class SiteOpsTest extends LiveTestCase
         self::assertSame(201, $post['status']);
         $id = (int) $post['body']['id'];
 
-        $meta = $this->api('GET', '/seo/metadata/' . $id);
-        self::assertSame(200, $meta['status']);
-        $patched = $this->api('PATCH', '/seo/metadata/' . $id, [
-            'title' => 'SEO title',
-            'description' => 'SEO description',
-        ]);
-        self::assertContains($patched['status'], [200, 201]);
-
-        $this->api('DELETE', '/content/' . $id . '?force=1');
+        try {
+            $meta = $this->api('GET', '/seo/metadata/' . $id);
+            self::assertSame(200, $meta['status']);
+            $patched = $this->api('PATCH', '/seo/metadata/' . $id, [
+                'title' => 'SEO title',
+                'description' => 'SEO description',
+            ]);
+            self::assertContains($patched['status'], [200, 201]);
+        } finally {
+            $this->api('DELETE', '/content/' . $id . '?force=1');
+        }
     }
 
     #[Test]
@@ -59,27 +63,26 @@ final class SiteOpsTest extends LiveTestCase
         self::assertContains($created['status'], [200, 201], (string) json_encode($created['body']));
         $menuId = (int) ($created['body']['id'] ?? 0);
         self::assertGreaterThan(0, $menuId);
-
-        $listed = $this->api('GET', '/navigation/menus');
-        self::assertSame(200, $listed['status']);
-
-        $deleted = $this->api('DELETE', '/navigation/menus/' . $menuId);
-        self::assertSame(200, $deleted['status']);
-
         $source = '/e2e-' . $this->faker->unique()->numerify('redir-####');
-        $upserted = $this->api('POST', '/redirects', [
-            'source' => $source,
-            'destination' => 'https://example.com/e2e',
-            'status' => 301,
-        ]);
-        self::assertContains($upserted['status'], [200, 201], (string) json_encode($upserted['body']));
 
-        $redirects = $this->api('GET', '/redirects');
-        self::assertSame(200, $redirects['status']);
-        $this->api('GET', '/redirects/not-found');
+        try {
+            $listed = $this->api('GET', '/navigation/menus');
+            self::assertSame(200, $listed['status']);
 
-        $removed = $this->api('DELETE', '/redirects/' . rawurlencode(ltrim($source, '/')));
-        self::assertContains($removed['status'], [200, 204, 400]);
+            $upserted = $this->api('POST', '/redirects', [
+                'source' => $source,
+                'destination' => 'https://example.com/e2e',
+                'status' => 301,
+            ]);
+            self::assertContains($upserted['status'], [200, 201], (string) json_encode($upserted['body']));
+
+            $redirects = $this->api('GET', '/redirects');
+            self::assertSame(200, $redirects['status']);
+            $this->api('GET', '/redirects/not-found');
+        } finally {
+            $this->api('DELETE', '/navigation/menus/' . $menuId);
+            $this->api('DELETE', '/redirects/' . rawurlencode(ltrim($source, '/')));
+        }
     }
 
     #[Test]

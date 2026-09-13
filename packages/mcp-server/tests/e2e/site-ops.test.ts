@@ -5,7 +5,7 @@ describe.skipIf(!runE2EFull)("e2e site operations", () => {
   const session = new McpSession();
   const stamp = Date.now();
   let postId = 0;
-  let originalDescription = "";
+  let originalDescription: string | undefined;
 
   beforeAll(async () => {
     await session.connect();
@@ -26,7 +26,7 @@ describe.skipIf(!runE2EFull)("e2e site operations", () => {
     if (postId > 0) {
       await session.call("wordpress_delete_content", { id: postId, force: true, confirm: true });
     }
-    if (originalDescription !== "") {
+    if (originalDescription !== undefined) {
       await session.call("wordpress_update_site_settings", {
         blogdescription: originalDescription,
         confirm: true,

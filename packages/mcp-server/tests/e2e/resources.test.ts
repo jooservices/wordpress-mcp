@@ -25,9 +25,9 @@ describe.skipIf(!runE2EFull)("e2e MCP resources", () => {
 
   it("lists resource templates and reads site + content", async () => {
     const templates = await session.client.listResourceTemplates();
-    expect(templates.resourceTemplates.length).toBeGreaterThan(0);
-    const listed = await session.client.listResources();
-    const uris = listed.resources.map((resource) => resource.uri);
+    const templateUris = templates.resourceTemplates.map((template) => template.uriTemplate);
+    expect(templateUris.some((uri) => uri.includes("wordpress://sites/"))).toBe(true);
+    expect(templateUris.some((uri) => uri.includes("wordpress://content/"))).toBe(true);
 
     const site = await session.client.readResource({ uri: `wordpress://sites/${siteId}` });
     expect(site.contents.length).toBeGreaterThan(0);

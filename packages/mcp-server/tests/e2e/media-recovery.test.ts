@@ -35,7 +35,7 @@ describe.skipIf(!runE2EFull)("e2e media orphan recovery", () => {
       matched_orphan_url?: string | null;
       expected_path?: string | null;
     }> | undefined) ?? [];
-    const match = items.find((item) => item.expected_path === ORPHAN_PATH || item.matched_orphan_url);
+    const match = items.find((item) => item.expected_path === ORPHAN_PATH);
     expect(match, `expected a broken-ref match for ${ORPHAN_PATH}`).toBeTruthy();
     expect(match?.matched_orphan_url).toBeTruthy();
   });
