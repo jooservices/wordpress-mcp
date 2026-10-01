@@ -39,6 +39,7 @@ final class ContentNormalizerTest extends TestCase
         $post->post_author = $faker->numberBetween(1, 100);
         $GLOBALS['wp_test_post_titles'][$post->ID] = $faker->sentence(3);
         $category = new \WP_Term($faker->numberBetween(1, 100), $faker->slug());
+        $category->name = '';
         $category->name = $faker->word();
         $GLOBALS['wp_test_post_terms'][$post->ID]['category'] = [$category];
         $GLOBALS['wp_test_post_terms'][$post->ID]['post_tag'] = false;
