@@ -27,6 +27,7 @@ jobs:
 
       - name: Install and CI
         run: |
+          docker compose run --rm --no-deps php composer validate --strict
           docker compose run --rm --no-deps php composer install --no-interaction
           docker compose run --rm --no-deps php composer ci
 

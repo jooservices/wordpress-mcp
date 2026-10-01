@@ -27,6 +27,70 @@ final class AuthTest extends TestCase
     }
 
     #[Test]
+    public function it_rejects_missing_or_malformed_bearer_headers(): void
+    {
+        ConnectionAuthenticator::reset();
+
+        self::assertNull(ConnectionAuthenticator::authenticateFromRequest(null));
+        self::assertNull(ConnectionAuthenticator::authenticateFromRequest('Basic invalid'));
+        self::assertNull(ConnectionAuthenticator::current());
+    }
+
+    #[Test]
+    public function it_authenticates_a_connection_and_updates_last_used(): void
+    {
+        $faker = Factory::create();
+        $token = $faker->sha256();
+        $hadWpdb = array_key_exists('wpdb', $GLOBALS);
+        $previousWpdb = $GLOBALS['wpdb'] ?? null;
+        $GLOBALS['wpdb'] = new class (ConnectionAuthenticator::hashToken($token)) {
+            public string $prefix = 'wp_';
+
+            public function __construct(private readonly string $hash)
+            {
+            }
+
+            public function prepare(string $query, string $hash): string
+            {
+                return $query . $hash;
+            }
+
+            public function get_row(string $query, string $output): array
+            {
+                return [
+                    'id' => '7',
+                    'name' => 'Test connection',
+                    'token_hash' => $this->hash,
+                    'user_id' => '9',
+                    'scopes' => '["posts.read"]',
+                    'active' => '1',
+                    'created_at' => '2026-01-01 00:00:00',
+                    'last_used_at' => null,
+                ];
+            }
+
+            public function update(string $table, array $data, array $where, array $format, array $whereFormat): int
+            {
+                return 1;
+            }
+        };
+
+        try {
+            $connection = ConnectionAuthenticator::authenticateFromRequest('Bearer ' . $token);
+
+            self::assertInstanceOf(Connection::class, $connection);
+            self::assertSame($connection, ConnectionAuthenticator::current());
+            self::assertSame(9, $GLOBALS['wp_test_current_user']);
+        } finally {
+            if ($hadWpdb) {
+                $GLOBALS['wpdb'] = $previousWpdb;
+            } else {
+                unset($GLOBALS['wpdb']);
+            }
+        }
+    }
+
+    #[Test]
     public function it_checks_scopes_on_connection(): void
     {
         $connection = new Connection(
