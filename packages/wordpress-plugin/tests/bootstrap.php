@@ -411,9 +411,66 @@ if (! function_exists('wp_get_attachment_metadata')) {
 }
 
 if (! function_exists('get_the_title')) {
-    function get_the_title(int $postId): string
+    function get_the_title(int|WP_Post $post): string
     {
+        $postId = $post instanceof WP_Post ? $post->ID : $post;
+
         return (string) ($GLOBALS['wp_test_post_titles'][$postId] ?? '');
+    }
+}
+
+if (! function_exists('get_permalink')) {
+    function get_permalink(int|WP_Post $post): string
+    {
+        $postId = $post instanceof WP_Post ? $post->ID : $post;
+
+        return 'https://example.test/?p=' . $postId;
+    }
+}
+
+if (! function_exists('wp_strip_all_tags')) {
+    function wp_strip_all_tags(string $text): string
+    {
+        return strip_tags($text);
+    }
+}
+
+if (! function_exists('wp_trim_words')) {
+    function wp_trim_words(string $text, int $numWords = 55, string $more = '…'): string
+    {
+        $words = preg_split('/\s+/', trim($text)) ?: [];
+
+        return count($words) <= $numWords ? implode(' ', $words) : implode(' ', array_slice($words, 0, $numWords)) . $more;
+    }
+}
+
+if (! function_exists('get_userdata')) {
+    function get_userdata(int $userId): mixed
+    {
+        return $GLOBALS['wp_test_users'][$userId] ?? null;
+    }
+}
+
+if (! function_exists('wp_set_current_user')) {
+    function wp_set_current_user(int $userId): int
+    {
+        $GLOBALS['wp_test_current_user'] = $userId;
+
+        return $userId;
+    }
+}
+
+if (! function_exists('current_time')) {
+    function current_time(string $type, bool $gmt = false): string
+    {
+        return '2026-01-01 00:00:00';
+    }
+}
+
+if (! function_exists('get_the_terms')) {
+    function get_the_terms(WP_Post $post, string $taxonomy): array|false
+    {
+        return $GLOBALS['wp_test_post_terms'][$post->ID][$taxonomy] ?? false;
     }
 }
 
@@ -584,7 +641,7 @@ if (! function_exists('get_post_modified_time')) {
 }
 
 if (! function_exists('get_post_time')) {
-    function get_post_time(string $format, bool $gmt, int $postId): string
+    function get_post_time(string $format, bool $gmt, int|WP_Post $post): string
     {
         return '2026-01-01T00:00:00+00:00';
     }

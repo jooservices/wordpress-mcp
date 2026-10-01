@@ -139,7 +139,9 @@ final class MediaServiceTest extends TestCase
         $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
         $relative = '2025/01/corrupted-' . uniqid() . '.png';
         $full = $basedir . '/' . $relative;
-        mkdir(dirname($full), 0777, true);
+        if (! is_dir(dirname($full))) {
+            mkdir(dirname($full), 0777, true);
+        }
         file_put_contents($full, 'not-a-png');
 
         $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [

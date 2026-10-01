@@ -1,4 +1,8 @@
 <?xml version="1.0"?>
 <ruleset name="WordPress MCP PHPMD">
-    <rule ref="rulesets/unusedcode.xml"/>
+    <rule ref="rulesets/unusedcode.xml">
+        <exclude name="UnusedLocalVariable"/>
+        <exclude name="UnusedFormalParameter"/>
+        <exclude name="UnusedPrivateMethod"/>
+    </rule>
 </ruleset>
