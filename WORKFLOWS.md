@@ -19,14 +19,14 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 
 | Workflow | Check name | Role |
 | --- | --- | --- |
-| `ci.yml` | `PHP plugin` · `MCP server` · `Security (Secrets)` · **`Coverage upload`** | Quality + secret scan; final gate needs the three jobs |
+| `ci.yml` | `PHP plugin` · `MCP server` · `Security (Secrets)` · **`Coverage upload`** | PHP and MCP quality gates (MCP includes `npm audit`); secret scan; final gate needs the three jobs |
 | `e2e.yml` | `Docker WordPress + MCP` | Nightly + `workflow_dispatch` full Compose E2E. **Not** a PR required check. |
 | `plugin-e2e.yml` | `WordPress plugin REST` | Live plugin REST against Docker WordPress (no MCP). PR + nightly + `workflow_dispatch`. **Not** in the `Coverage upload` required chain. |
 | `commitlint.yml` | `Validate commit messages` | Conventional Commits on every PR commit |
 | `semantic-pr.yml` | `Validate PR Title` | PR title type + uppercase subject |
 | `scorecard.yml` | Push to `develop`; weekly; manual | OpenSSF Scorecard |
 
-`Coverage upload` is the merge-blocking CI leaf (same pattern as `dto` / `client`). It does not upload Codecov yet; it only succeeds when PHP, MCP, and Gitleaks jobs succeed.
+`Coverage upload` is the merge-blocking CI leaf (same pattern as `dto` / `client`). It does not upload Codecov yet; it only succeeds when PHP, MCP (Node 24 audit, lint, tests, and build), and Gitleaks jobs succeed.
 
 ## Local commands
 
