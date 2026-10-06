@@ -3,7 +3,7 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![Coverage (develop)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/wordpress-mcp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/wordpress-mcp)
-[![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
+[![PHP Version](https://img.shields.io/badge/PHP-8.5%2B-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
 [![GitHub Release](https://img.shields.io/github/v/release/jooservices/wordpress-mcp?display_name=tag)](https://github.com/jooservices/wordpress-mcp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -19,8 +19,8 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 | | |
 | --- | --- |
 | Status | **v1.4.6 — JOOservices standards, Docker E2E, interactive `make mcp-up`, WP 7 nav + qs fixes** |
-| Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
-| Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
+| Packages | `packages/wordpress-plugin` (PHP `^8.5`) + `packages/mcp-server` (Node 24) |
+| Compatibility | WordPress 6.4+, plugin PHP `^8.5` (PHP 8.3/8.4 are no longer supported), MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
 
 ## Features
@@ -56,8 +56,13 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ## Requirements
 
 - Docker with Docker Compose (all dev, test, and CI commands)
-- WordPress site with PHP **8.3+**
+- WordPress site with PHP **`^8.5`**. The plugin no longer supports PHP 8.3 or 8.4.
 - ChatGPT account with Developer Mode (for connector setup)
+
+## Installation
+
+Install and activate the WordPress plugin by following the [WordPress setup guide](docs/WORDPRESS-SETUP.md).
+Configure the MCP server separately using the [deployment guide](docs/DEPLOYMENT.md).
 
 ## Quick start (local)
 
@@ -157,6 +162,20 @@ Clients can browse WordPress entities without calling tools:
 
 Resources share the DTO whitelists and per-tool policy: disabling `wordpress_get_content` (or omitting it from `MCP_ENABLED_TOOLS`) also blocks the `wordpress://content/...` resource.
 
+## Documentation
+
+| Doc | Description |
+|-----|-------------|
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview |
+| [ADR-001](docs/ADR-001-integration-architecture.md) | Integration decision record |
+| [WORDPRESS-SETUP.md](docs/WORDPRESS-SETUP.md) | Plugin install |
+| [UPGRADING.md](docs/UPGRADING.md) | Upgrade and rollback guide |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | MCP server deploy |
+| [CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md) | ChatGPT connector |
+| [OAUTH-EXPLAINED.md](docs/OAUTH-EXPLAINED.md) | OAuth vs. WordPress connection scopes explained |
+| [WORKFLOWS.md](WORKFLOWS.md) | Branch, CI, and Docker workflow details |
+| [CHANGELOG.md](CHANGELOG.md) | Release history |
+
 ## Development
 
 ```bash
@@ -173,31 +192,6 @@ make plugin-release
 ```
 
 All commands run in Docker per JOOservices workspace rules.
-
-## Branch model & CI
-
-| Branch | Role |
-|--------|------|
-| `master` | Production releases; tags from here |
-| `develop` | Integration; feature PRs target here |
-
-PRs require green CI: Pint, PHPCS, PHPStan, PHPUnit (plugin) + TypeScript build + Vitest (MCP server), plus commitlint and semantic PR title checks.
-
-See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Documentation
-
-| Doc | Description |
-|-----|-------------|
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System overview |
-| [ADR-001](docs/ADR-001-integration-architecture.md) | Integration decision record |
-| [WORDPRESS-SETUP.md](docs/WORDPRESS-SETUP.md) | Plugin install |
-| [UPGRADING.md](docs/UPGRADING.md) | Upgrade and rollback guide |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | MCP server deploy |
-| [CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md) | ChatGPT connector |
-| [OAUTH-EXPLAINED.md](docs/OAUTH-EXPLAINED.md) | OAuth vs. WordPress connection scopes explained |
-| [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [SECURITY.md](SECURITY.md) | Security model |
 
 ## Community
 

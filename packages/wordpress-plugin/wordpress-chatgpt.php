@@ -8,7 +8,7 @@ declare(strict_types=1);
  * Version: 1.4.6
  * Author: JOOservices
  * Requires at least: 6.4
- * Requires PHP: 8.3
+ * Requires PHP: 8.5
  * Text Domain: wordpress-chatgpt
  */
 

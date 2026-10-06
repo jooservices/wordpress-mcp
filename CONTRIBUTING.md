@@ -5,9 +5,9 @@ Thank you for considering a contribution to `jooservices/wordpress-mcp`.
 ## Requirements
 
 - Docker with Docker Compose — **all** tooling runs in containers
-- Familiarity with WordPress plugin development (PHP `^8.3`) and TypeScript (Node 24)
+- Familiarity with WordPress plugin development (PHP `^8.5`) and TypeScript (Node 24)
 
-PHP stays on **`^8.3`** to match supported WordPress PHP runtimes (`wordpress:php8.3-apache` in Compose). Do not raise the plugin requirement to 8.5 unless WordPress host policy changes.
+The plugin requires PHP **`^8.5`**. PHP 8.3 and 8.4 hosts are no longer supported.
 
 ## Setup
 

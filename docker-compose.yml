@@ -15,7 +15,7 @@ services:
       retries: 20
 
   wordpress:
-    image: wordpress:php8.3-apache
+    image: wordpress:php8.5-apache
     ports:
       - "${WORDPRESS_HOST_PORT:-8080}:80"
     environment:
@@ -36,7 +36,7 @@ services:
         condition: service_healthy
 
   wp-init:
-    image: wordpress:cli-php8.3
+    image: wordpress:cli-php8.5
     user: "33:33"
     environment:
       WORDPRESS_DB_HOST: db
@@ -77,7 +77,7 @@ services:
     build:
       context: ./packages/wordpress-plugin
       dockerfile: Dockerfile
-    image: jooservices/wordpress-mcp-plugin:php83
+    image: jooservices/wordpress-mcp-plugin:php85
     working_dir: /app/packages/wordpress-plugin
     volumes:
       - .:/app

@@ -1,3 +1,8 @@
+> **Next plugin release:** It will require PHP **`^8.5`**. If your WordPress
+> site runs PHP 8.3 or 8.4, upgrade its PHP runtime to PHP 8.5 or a later
+> compatible PHP 8.x version before updating the plugin. Defer the plugin
+> update until then.
+
 # Upgrading to v1.4.0
 
 v1.4.0 adds post templates, a verified media upload pipeline, and consolidates the MCP tool surface from 50 to 42 tools. Upgrade the WordPress plugin and the MCP server together.

@@ -51,13 +51,17 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 4. Tag `vx.y.z` on `master`
 5. PR merge `master` → `develop`
 
-## Docker services (dev)
+## Runtime and Docker images
 
-| Service | Image |
-|---------|-------|
-| db | `mariadb:11.4.13` |
-| wordpress | `wordpress:php8.3-apache` |
-| php (tooling) | `php:8.3-cli-bookworm` (`jooservices/wordpress-mcp-plugin:php83`) |
-| mcp | built from `packages/mcp-server` (Node 24) |
+The plugin requires PHP **`^8.5`**; PHP 8.3 and 8.4 hosts are no longer supported. Development, tests, and CI use Docker.
+
+| Component / service | Runtime or image | Use |
+|---------------------|------------------|-----|
+| WordPress plugin tooling (`php`) | `php:8.5-cli-bookworm`, Compose image `jooservices/wordpress-mcp-plugin:php85` | Composer, lint, and plugin tests |
+| WordPress (`wordpress`) | `wordpress:php8.5-apache` | Local WordPress host and E2E |
+| WordPress CLI (`wp-init`) | `wordpress:cli-php8.5` | Local WordPress initialization |
+| MCP server (`mcp`) | `node:24-bookworm-slim` (built from `packages/mcp-server/Dockerfile`) | Local MCP server |
+| Node helper (`node`, `integration`) | `node:24-bookworm-slim` | CI and integration commands |
+| Database (`db`) | `mariadb:11.4.13` | Local WordPress database |
 
 Production MCP-only stack: `docker-compose.prod.yml` + `.env.prod`.

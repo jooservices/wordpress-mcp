@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - E2E smoke (`make e2e`) uses compose DNS `http://wordpress` and leaves public-URL verification on (`E2E_SKIP_PUBLIC_URL=0`). `make up` still defaults to `localhost:8080` and skips that verify so the host admin UI works.
 - Docker mu-plugin skips public-URL verify only when `E2E_SKIP_PUBLIC_URL=1`.
+- The next plugin release will require PHP **`^8.5`**; sites running PHP 8.3
+  or 8.4 must upgrade their PHP runtime before updating the plugin.
 
 ## [1.4.6] - 2026-09-05
 
