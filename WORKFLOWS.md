@@ -20,7 +20,7 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 | Workflow | Check name | Role |
 | --- | --- | --- |
 | `ci.yml` | `PHP plugin` · `MCP server` · `Security (Secrets)` · **`Coverage upload`** | PHP and MCP quality gates (MCP includes `npm audit`); secret scan; final gate needs the three jobs |
-| `e2e.yml` | `Docker WordPress + MCP` | Nightly + `workflow_dispatch` full Compose E2E. **Not** a PR required check. |
+| `e2e.yml` | `Docker WordPress + MCP` | Required check on PRs to `develop` / `master`; also runs nightly and via `workflow_dispatch`. Full Compose E2E, then live stack integration. |
 | `plugin-e2e.yml` | `WordPress plugin REST` | Live plugin REST against Docker WordPress (no MCP). PR + nightly + `workflow_dispatch`. **Not** in the `Coverage upload` required chain. |
 | `commitlint.yml` | `Validate commit messages` | Conventional Commits on every PR commit |
 | `semantic-pr.yml` | `Validate PR Title` | PR title type + uppercase subject |
@@ -34,9 +34,9 @@ Workflows under `.github/workflows/` on PRs to `develop` or `master`:
 |---------|---------|
 | `make ci` | Full quality gate |
 | `make test` | Unit tests only |
-| `make integration` | Live stack integration (requires `make up`) |
+| `make integration` | Live stack integration (requires `make up` or `make e2e-full`) |
 | `make e2e` | Docker WP + plugin + MCP smoke (all 45 tools). Sets `WP_INTERNAL_URL=http://wordpress` and `E2E_SKIP_PUBLIC_URL=0`. |
-| `make e2e-full` | Smoke plus content/featured, media verify (including large JPEG), orphan adopt, resources, site-ops. Nightly / `workflow_dispatch` in `.github/workflows/e2e.yml`. Not a PR required check. |
+| `make e2e-full` | Smoke plus content/featured, media verify (including large JPEG), orphan adopt, resources, site-ops, mixed-auth config smoke, and live stack integration. Required on PRs to `develop` / `master`; also nightly and via `workflow_dispatch` in `.github/workflows/e2e.yml`. |
 | `make plugin-e2e` | Docker WordPress + plugin only (no MCP). PHPUnit live HTTP against `/wp-json/chatgpt-connector/v1/`. |
 | `make plugin-release` | Build `build/wordpress-chatgpt-<version>.zip` (version read from the plugin header) |
 | `tools/install-git-hooks` | Install CaptainHook hooks (Docker) |
