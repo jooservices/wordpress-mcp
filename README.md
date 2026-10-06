@@ -3,8 +3,8 @@
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![Coverage (develop)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/wordpress-mcp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/wordpress-mcp)
-[![PHP Version](https://img.shields.io/badge/PHP-8.5%2B-blue.svg)](https://www.php.net/)
-[![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
+[![PHP Version](https://img.shields.io/badge/PHP-%5E8.5-blue.svg)](https://www.php.net/)
+[![Node](https://img.shields.io/badge/Node-24.x-green.svg)](https://nodejs.org/)
 [![GitHub Release](https://img.shields.io/github/v/release/jooservices/wordpress-mcp?display_name=tag)](https://github.com/jooservices/wordpress-mcp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
