@@ -50,6 +50,6 @@ wp post create --post_title="Hello from WordPress MCP" --post_content="Sample pu
 wp post create --post_title="Draft MCP Test" --post_content="A draft post for testing." --post_status=draft --porcelain || true
 
 echo "Seeding dev connection..."
-wp eval-file /init/seed-connection.php
+wp eval-file /init/seed-connection.php --use-include
 
 echo "Setup complete."

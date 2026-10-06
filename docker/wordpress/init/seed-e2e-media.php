@@ -1,6 +1,7 @@
 <?php
+declare(strict_types=1);
 
-// Consumed by `wp eval-file`. Do not add declare(strict_types=1).
+// This file is consumed by `wp eval-file --use-include` so strict types apply.
 
 if (! defined('ABSPATH')) {
     exit("Run via wp eval-file\n");

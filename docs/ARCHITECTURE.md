@@ -53,7 +53,12 @@ WordPress is **not** bundled in production — deploy the plugin on each custome
 
 ## Dev stack images
 
-- MariaDB 11.4.13
-- WordPress PHP 8.3
-- MCP Node 24
-- PHP 8.3 CLI for plugin CI
+The plugin requires PHP **`^8.5`**; PHP 8.3 and 8.4 hosts are no longer supported.
+
+| Component | Image / runtime |
+|-----------|-----------------|
+| MariaDB | `mariadb:11.4.13` |
+| WordPress | `wordpress:php8.5-apache` |
+| WordPress CLI initialization | `wordpress:cli-php8.5` |
+| MCP server, Node helper, integration runner | `node:24-bookworm-slim` |
+| PHP plugin tooling / CI | `php:8.5-cli-bookworm`, built as `jooservices/wordpress-mcp-plugin:php85` |
