@@ -60,7 +60,7 @@ services:
       context: ./packages/mcp-server
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${MCP_HOST_PORT:-3000}:3000"
     environment:
       WORDPRESS_URL: http://wordpress
       WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}

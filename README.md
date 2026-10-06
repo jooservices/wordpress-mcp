@@ -185,7 +185,7 @@ make ci            # lint + tests (Docker)
 make test          # unit tests
 make integration   # MCP → WordPress REST (stack must be up)
 make e2e           # Docker WP + plugin + MCP; smoke all 45 tools
-make e2e-full      # smoke + content/featured + media verify + orphan recovery + resources
+make e2e-full      # full E2E + live integration; override host ports if occupied
 make plugin-e2e    # Docker WP + plugin REST only (no MCP)
 make down          # stop dev stack
 make plugin-release

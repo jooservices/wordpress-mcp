@@ -6,6 +6,8 @@ cd "$ROOT"
 
 COMPOSE="${DOCKER_COMPOSE:-docker compose}"
 FULL="${E2E_FULL:-0}"
+OAUTH_ENABLED=0
+OAUTH_MODE=static
 
 if [ ! -f .env ]; then
   cp .env.example .env
@@ -16,12 +18,15 @@ fi
 export E2E_SKIP_PUBLIC_URL=0
 export WP_INTERNAL_URL=http://wordpress
 export WORDPRESS_HOST_PORT="${WORDPRESS_HOST_PORT:-18080}"
+export MCP_HOST_PORT="${MCP_HOST_PORT:-3000}"
 # Seeded orphan cache must not be overwritten by an overdue WP-Cron scan mid-suite.
 export WORDPRESS_CONFIG_EXTRA="define('DISABLE_WP_CRON', true);"
 export DISABLE_WP_CRON=1
 export RUN_E2E=1
 if [ "$FULL" = "1" ]; then
   export RUN_E2E_FULL=1
+  OAUTH_ENABLED=1
+  OAUTH_MODE=mixed
 fi
 
 echo "==> Building images"
@@ -44,7 +49,7 @@ fi
 
 echo "==> Waiting for MCP /health"
 deadline=$((SECONDS + 120))
-until curl -sf http://localhost:3000/health >/dev/null; do
+until curl -sf "http://localhost:${MCP_HOST_PORT}/health" >/dev/null; do
   if (( SECONDS >= deadline )); then
     echo "MCP health check timed out"
     $COMPOSE logs --tail=80 mcp wordpress
@@ -77,6 +82,14 @@ fi
 $COMPOSE --profile e2e run --rm \
   -e RUN_E2E=1 \
   -e RUN_E2E_FULL="${RUN_E2E_FULL:-}" \
+  -e RUN_E2E_OAUTH="$OAUTH_ENABLED" \
+  -e MCP_AUTH_MODE="$OAUTH_MODE" \
+  -e MCP_PUBLIC_URL=http://mcp:3000 \
   e2e
+
+if [ "$FULL" = "1" ]; then
+  echo "==> Running live stack integration"
+  $COMPOSE --profile integration run --rm integration
+fi
 
 echo "==> E2E passed"

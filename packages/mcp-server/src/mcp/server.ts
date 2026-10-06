@@ -1462,7 +1462,9 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
             destination: args.destination,
             status: args.status,
           })
-        : await client.delete<Record<string, unknown>>(`/redirects/${encodeURIComponent(args.source)}`);
+        : await client.delete<Record<string, unknown>>(
+            `/redirects/${encodeURIComponent(args.source.replace(/^\/+/, ""))}`,
+          );
 
       return {
         content: [{ type: "text", text: args.action === "upsert" ? `Saved redirect "${args.source}".` : `Deleted redirect "${args.source}".` }],
