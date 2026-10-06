@@ -10,13 +10,14 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "audit": "npm audit --audit-level=low",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "ci": "npm run lint && npm test && npm run build"
+    "ci": "npm run audit && npm run lint && npm test && npm run build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.30.1",
+    "@modelcontextprotocol/sdk": "^1.31.0",
     "express": "^4.21.2",
     "zod": "^3.25.76"
   },
