@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
 [![Coverage (develop)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop)
+[![Quality Gate (master)](https://sonarcloud.io/api/project_badges/measure?project=jooservices_wordpress-mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_wordpress-mcp)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/wordpress-mcp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/wordpress-mcp)
 [![PHP Version](https://img.shields.io/badge/PHP-%5E8.3-blue.svg)](https://www.php.net/)
 [![Node](https://img.shields.io/badge/Node-24.x-green.svg)](https://nodejs.org/)
@@ -14,11 +15,11 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.4.6
+## About v1.5.0
 
 | | |
 | --- | --- |
-| Status | **v1.4.6 — JOOservices standards, Docker E2E, interactive `make mcp-up`, WP 7 nav + qs fixes** |
+| Status | **v1.5.0 — Media recovery, site operations, and expanded MCP CI/E2E coverage** |
 | Packages | `packages/wordpress-plugin` (PHP `^8.3`; CI and E2E on PHP 8.3, 8.4, and 8.5) + `packages/mcp-server` (Node 24) |
 | Compatibility | WordPress 6.4+, plugin PHP `^8.3`, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
