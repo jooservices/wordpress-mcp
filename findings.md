@@ -2,16 +2,16 @@
 
 ## Review result
 
-Independent review rounds 1–3 passed. There are zero open critical or required findings. The remaining optional note is non-blocking and deferred.
+Independent review rounds 1–3 passed. PR #74 merged into `develop` at `b30e86f` after all 5 required checks and 18 hosted contexts passed. There are zero open critical or required findings. The Qodo subscription-paused notice was acknowledged; no actionable review findings remain.
 
 ## Finding dispositions
 
-### PR #74 CodeRabbit feedback — local fixes complete, GitHub threads pending
+### PR #74 CodeRabbit feedback — fixed and triaged
 
 #### F-7 — Unplanned MariaDB major-version change
 
 - **Severity:** Major
-- **Status:** Reverted locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Status:** Fixed in `73eb8c2`; PR thread replied to and resolved.
 - **Evidence:** The feature branch changed the dev database image from MariaDB `11.4.13` to `12.3.3` without a database upgrade plan.
 - **Resolution:** Restored `mariadb:11.4.13` and synchronized `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md` with the existing dev stack.
 - **Verification:** `docker compose config` and `make e2e-full` passed with the restored image.
@@ -19,7 +19,7 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 #### F-8 — Mixed-mode OAuth errors and bearer challenge
 
 - **Severity:** Major
-- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Status:** Fixed in `73eb8c2`; PR thread replied to and resolved.
 - **Evidence:** Malformed/invalid mixed-mode bearer credentials returned 401 without resource metadata; OAuth storage failures were also treated as invalid credentials.
 - **Resolution:** Invalid/expired tokens at the mixed-mode `/mcp` endpoint now use a typed error and return a 401 `WWW-Authenticate` challenge with `resource_metadata`. OAuth state read/parse errors are no longer hidden as empty state, so mixed-mode storage failures return a generic 500 response.
 - **Verification:** MCP body parsing/auth tests passed for malformed bearer, invalid token, storage read failure, and normal OAuth flows; `make ci` passed.
@@ -27,7 +27,7 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 #### F-9 — Comment author fields omitted
 
 - **Severity:** Minor
-- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Status:** Fixed in `73eb8c2`; PR thread replied to and resolved.
 - **Evidence:** Comment creation passed only `user_id`, which left the author name/email/URL unspecified.
 - **Resolution:** Resolve the connection user and pass `display_name`, `user_email`, and `user_url` to `wp_new_comment`; reject a missing user as invalid input.
 - **Verification:** Live REST coverage asserts the created comment author matches the authenticated admin user; `make plugin-e2e` passed (23 tests / 197 assertions).
@@ -35,7 +35,7 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 #### F-10 — Object menu items could not be deleted
 
 - **Severity:** Minor
-- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Status:** Fixed in `73eb8c2`; PR thread replied to and resolved.
 - **Evidence:** Delete validation only accepted `custom`, although object item creation uses `post_type` and `taxonomy`.
 - **Resolution:** Deletion now accepts those three supported menu item types while retaining post type and menu ownership checks.
 - **Verification:** Unit and live REST tests cover post and taxonomy items; `make ci`, `make plugin-e2e`, and `make e2e-full` passed.
@@ -43,7 +43,7 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 #### F-11 — Default category deletion reported as success
 
 - **Severity:** Minor
-- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Status:** Fixed in `73eb8c2`; PR thread replied to and resolved.
 - **Evidence:** WordPress returns integer `0` when asked to delete the protected default category; the code treated any result other than `false` or `WP_Error` as success.
 - **Resolution:** Only the documented boolean `true` result is considered successful.
 - **Verification:** Regression unit test covers WordPress's `0` response; `make ci` passed.
@@ -59,9 +59,9 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 ### F-2 — Release version metadata still at 1.4.6
 
 - **Severity:** Required for release, not for the feature PR
-- **Status:** Deferred to the approved metadata-only `release/1.5.0` branch
+- **Status:** Updated on `release/1.5.0`; release PR checks and merge are pending
 - **Evidence:** The feature candidate intentionally preserves current version references so version changes remain isolated to the release PR.
-- **Resolution plan:** Update manifests, runtime version constants, README status, and changelog links on `release/1.5.0` before opening the PR to `master`.
+- **Resolution:** Updated manifests, runtime version constants, README status, and changelog links on `release/1.5.0`. Hosted release checks remain pending.
 
 ### F-3 — Generated PHP-CS-Fixer cache
 
@@ -92,4 +92,4 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 - **Severity:** Optional
 - **Status:** Deferred, non-blocking
 - **Evidence:** The approved candidate spans MCP tools, WordPress REST operations, tests, Docker, CI, and documentation.
-- **Disposition:** No correctness defect was identified from the change size. The complete local quality, REST, and full E2E gates passed; hosted PR checks remain the merge gate.
+- **Disposition:** No correctness defect was identified from the change size. Local quality, REST, and full E2E gates passed; PR #74's hosted checks passed before merge.

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-13
+
 ### Added
 
 - Three MCP navigation tools for menu details, custom-link item management and ordering, and theme-location assignments. Mutations require `confirm: true`.
@@ -266,7 +268,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP JSON body limit 15 MB for media upload payloads
 - Site tokens never exposed via `wordpress_list_sites` or `/health`
 
-[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.6...develop
+[Unreleased]: https://github.com/jooservices/wordpress-mcp/compare/v1.5.0...develop
+[1.5.0]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.6...v1.5.0
 [1.4.6]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.5...v1.4.6
 [1.4.5]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.4...v1.4.5
 [1.4.4]: https://github.com/jooservices/wordpress-mcp/compare/v1.4.3...v1.4.4
