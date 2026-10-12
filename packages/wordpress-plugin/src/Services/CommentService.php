@@ -8,6 +8,7 @@ use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Comment;
 use WP_Comment_Query;
+use WP_User;
 
 final class CommentService
 {
@@ -60,9 +61,11 @@ final class CommentService
     public function create(int $postId, string $content, int $parentId, int $userId): array
     {
         $post = get_post($postId);
+        $user = get_userdata($userId);
         if (
             ! $post instanceof \WP_Post
             || ! ContentTypes::isSupported($post->post_type)
+            || ! $user instanceof WP_User
             || ! comments_open($postId)
             || trim($content) === ''
             || $parentId < 0
@@ -83,6 +86,9 @@ final class CommentService
 
         $commentId = wp_new_comment(wp_slash([
             'comment_post_ID' => $postId,
+            'comment_author' => $user->display_name,
+            'comment_author_email' => $user->user_email,
+            'comment_author_url' => $user->user_url,
             'comment_content' => wp_kses_post($content),
             'comment_parent' => $parentId,
             'comment_type' => '',

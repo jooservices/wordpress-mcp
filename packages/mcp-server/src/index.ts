@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "./config.js";
 import { setupOAuth, type OAuthRuntime } from "./auth/setup.js";
+import { InvalidAccessTokenError } from "./auth/provider.js";
 import { runWithAuth } from "./auth/context.js";
 import { createMcpServer } from "./mcp/server.js";
 import { createObservabilityHandler } from "./mcp/observability.js";
@@ -191,10 +192,22 @@ function mcpAuthMiddleware(req: Request, res: Response, next: () => void): void 
   next();
 }
 
-function sendMcpUnauthorized(res: Response): void {
+function sendMcpUnauthorized(res: Response, resourceMetadataUrl?: string): void {
+  if (resourceMetadataUrl) {
+    res.setHeader("WWW-Authenticate", `Bearer resource_metadata=${JSON.stringify(resourceMetadataUrl)}`);
+  }
+
   res.status(401).json({
     jsonrpc: "2.0",
     error: { code: -32001, message: "Unauthorized MCP request" },
+    id: null,
+  });
+}
+
+function sendMcpInternalError(res: Response): void {
+  res.status(500).json({
+    jsonrpc: "2.0",
+    error: { code: -32603, message: "Internal server error" },
     id: null,
   });
 }
@@ -208,7 +221,7 @@ function mixedBearerBeforeJson(req: Request, res: Response, next: () => void): v
 
   const match = /^Bearer\s+(\S+)$/i.exec(header);
   if (!match || !oauthRuntime) {
-    sendMcpUnauthorized(res);
+    sendMcpUnauthorized(res, oauthRuntime?.resourceMetadataUrl);
     return;
   }
 
@@ -217,7 +230,14 @@ function mixedBearerBeforeJson(req: Request, res: Response, next: () => void): v
       req.auth = auth;
       next();
     },
-    () => sendMcpUnauthorized(res),
+    (error: unknown) => {
+      if (error instanceof InvalidAccessTokenError) {
+        sendMcpUnauthorized(res, oauthRuntime?.resourceMetadataUrl);
+        return;
+      }
+
+      sendMcpInternalError(res);
+    },
   );
 }
 

@@ -745,6 +745,18 @@ if (! function_exists('get_term')) {
     }
 }
 
+if (! function_exists('wp_delete_term')) {
+    $GLOBALS['wp_test_delete_term_result'] = true;
+    $GLOBALS['wp_test_delete_term_calls'] = [];
+
+    function wp_delete_term(int $termId, string $taxonomy): bool|int|WP_Error
+    {
+        $GLOBALS['wp_test_delete_term_calls'][] = ['term_id' => $termId, 'taxonomy' => $taxonomy];
+
+        return $GLOBALS['wp_test_delete_term_result'] ?? true;
+    }
+}
+
 if (! function_exists('get_post_thumbnail_id')) {
     function get_post_thumbnail_id(int|\WP_Post $post): int
     {

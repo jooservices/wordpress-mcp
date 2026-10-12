@@ -162,6 +162,18 @@ final class SiteOpsTest extends LiveTestCase
             self::assertSame($postId, (int) $comment['body']['post_id']);
             self::assertSame(0, (int) $comment['body']['parent_id']);
 
+            $users = $this->api('GET', '/users?per_page=50');
+            self::assertSame(200, $users['status']);
+            $adminDisplayName = null;
+            foreach (($users['body']['items'] ?? []) as $user) {
+                if (is_array($user) && ($user['login'] ?? null) === 'admin') {
+                    $adminDisplayName = (string) ($user['display_name'] ?? '');
+                    break;
+                }
+            }
+            self::assertNotNull($adminDisplayName);
+            self::assertSame($adminDisplayName, $comment['body']['author']);
+
             $reply = $this->api('POST', '/comments', [
                 'post_id' => $postId,
                 'content' => $this->faker->sentence(),
@@ -190,6 +202,15 @@ final class SiteOpsTest extends LiveTestCase
             $menu = $this->api('GET', '/navigation/menus/' . $menuId);
             self::assertSame(200, $menu['status']);
             self::assertCount(2, $menu['body']['items']);
+
+            foreach ([$pageItem, $categoryItem] as $menuItem) {
+                $deletedItem = $this->api(
+                    'DELETE',
+                    '/navigation/menus/' . $menuId . '/items/' . (int) $menuItem['body']['id'],
+                );
+                self::assertSame(200, $deletedItem['status'], (string) json_encode($deletedItem['body']));
+                self::assertTrue($deletedItem['body']['deleted'] ?? false);
+            }
         } finally {
             $deletedMenu = $this->api('DELETE', '/navigation/menus/' . $menuId);
             self::assertSame(200, $deletedMenu['status']);

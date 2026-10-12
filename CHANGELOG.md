@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Menu-item updates preserve omitted parent/order values, normalize order when positions collide, reject updates to non-custom items, and prevent cyclic parent hierarchies. Deletion verifies the item belongs to the requested menu.
 - Navigation-location updates validate the complete map and return the locations WordPress saved.
+- Mixed-mode MCP authentication returns the OAuth resource-metadata challenge for invalid bearer credentials and reports OAuth state storage failures as server errors.
+- Comment creation records the authenticated user's name, email, and URL; protected default-category deletion is reported as a failure.
+- Native page and taxonomy menu items can be deleted individually while preserving menu ownership checks.
 - Broken-media scans for a specific post now enforce WordPress `read_post` permissions before returning private or draft content metadata.
 - Content updates no longer deny Gutenberg blocks whose JSON `"id"` is not a media attachment. Embed checks use `wp-image-*`, `wp:image` / `wp:gallery`, gallery `ids`, and `data-id` only.
 - Media verification accepts attachments with empty intermediate `sizes` (tiny images).
@@ -30,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Refresh Node and Composer dependencies, including Express 5, Zod 4, TypeScript 7, Vitest 5, current WordPress stubs, PHPMD 3, and PHPUnit 12 for PHP 8.3 support.
-- Pin PHP 8.5.11, Composer 2.10.3, PCOV 1.0.12, Node 24.21.0, npm 12.2.0, WordPress 7.1.3, WP-CLI 2.12.0, MariaDB 12.3.3, Caddy 2.11.7, and ngrok 3.39.11 images/tools.
+- Pin PHP 8.5.11, Composer 2.10.3, PCOV 1.0.12, Node 24.21.0, npm 12.2.0, WordPress 7.1.3, WP-CLI 2.12.0, MariaDB 11.4.13, Caddy 2.11.7, and ngrok 3.39.11 images/tools.
 - Make the Git hook installer use portable `sed` behavior on Linux and macOS.
 - Support PHP 8.3–8.5 with CI, live plugin REST tests, and full Docker WordPress/MCP E2E matrices on pushes to `develop`.
 - E2E smoke (`make e2e`) uses compose DNS `http://wordpress` and leaves public-URL verification on (`E2E_SKIP_PUBLIC_URL=0`). `make up` still defaults to `localhost:8080` and skips that verify so the host admin UI works.

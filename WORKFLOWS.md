@@ -62,6 +62,6 @@ The plugin supports PHP **`^8.3`**. CI and Docker E2E test PHP 8.3, 8.4, and 8.5
 | WordPress CLI (`wp-init`) | `wordpress:cli-2.12.0-php${WORDPRESS_PHP_VERSION:-8.5}` | Local WordPress initialization |
 | MCP server (`mcp`) | `node:24.21.0-bookworm-slim` (built from `packages/mcp-server/Dockerfile`) | Local MCP server |
 | Node helper (`node`, `integration`) | `node:24.21.0-bookworm-slim`, npm 12.2.0 | CI and integration commands |
-| Database (`db`) | `mariadb:12.3.3` | Local WordPress database |
+| Database (`db`) | `mariadb:11.4.13` | Local WordPress database |
 
 Production MCP-only stack: `docker-compose.prod.yml` + `.env.prod`.

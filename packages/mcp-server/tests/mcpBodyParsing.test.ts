@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -124,6 +124,23 @@ describe("MCP body parsing and authentication order", () => {
       body: "{",
     });
     expect(invalidBearer.status).toBe(401);
+    expect(invalidBearer.headers.get("www-authenticate")).toContain("resource_metadata=");
+
+    const malformedBearer = await fetch(server.baseUrl + "/mcp", {
+      method: "POST",
+      headers: { authorization: "Bearer", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(malformedBearer.status).toBe(401);
+    expect(malformedBearer.headers.get("www-authenticate")).toContain("resource_metadata=");
+
+    mkdirSync(join(server.oauthDataDir, "oauth-state.json"));
+    const unavailableOAuthStore = await fetch(server.baseUrl + "/mcp", {
+      method: "POST",
+      headers: { authorization: "Bearer invalid-token", "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(unavailableOAuthStore.status).toBe(500);
 
     const tooLargeAnonymous = await fetch(server.baseUrl + "/mcp", {
       method: "POST",
@@ -132,6 +149,7 @@ describe("MCP body parsing and authentication order", () => {
     });
     expect(tooLargeAnonymous.status).toBe(413);
 
+    rmSync(join(server.oauthDataDir, "oauth-state.json"), { recursive: true, force: true });
     const introspection = await fetch(server.baseUrl + "/oauth/introspect", {
       method: "POST",
       headers: { "content-type": "application/json" },

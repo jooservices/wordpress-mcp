@@ -307,7 +307,7 @@ final class NavigationService
             ! $item instanceof \WP_Post
             || $item->post_type !== 'nav_menu_item'
             || ! \has_term($menuId, 'nav_menu', $itemId)
-            || \get_post_meta($itemId, '_menu_item_type', true) !== 'custom'
+            || ! \in_array(\get_post_meta($itemId, '_menu_item_type', true), ['custom', 'post_type', 'taxonomy'], true)
         ) {
             return ['deleted' => false, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }

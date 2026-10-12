@@ -57,7 +57,7 @@ The plugin supports PHP **`^8.3`**. CI and Docker E2E cover PHP 8.3, 8.4, and 8.
 
 | Component | Image / runtime |
 |-----------|-----------------|
-| MariaDB | `mariadb:12.3.3` |
+| MariaDB | `mariadb:11.4.13` |
 | WordPress | `wordpress:7.1.3-php${WORDPRESS_PHP_VERSION:-8.5}-apache` |
 | WordPress CLI initialization | `wordpress:cli-2.12.0-php${WORDPRESS_PHP_VERSION:-8.5}` |
 | MCP server, Node helper, integration runner | `node:24.21.0-bookworm-slim` |

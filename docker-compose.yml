@@ -1,6 +1,6 @@
 services:
   db:
-    image: mariadb:12.3.3
+    image: mariadb:11.4.13
     environment:
       MYSQL_DATABASE: ${WORDPRESS_DB_NAME:-wordpress}
       MYSQL_USER: ${WORDPRESS_DB_USER:-wordpress}

@@ -154,7 +154,7 @@ final class TaxonomyService
         }
 
         $result = \wp_delete_term($id, $taxonomy);
-        return $result === false || \is_wp_error($result)
+        return $result !== true
             ? ['deleted' => false, 'error' => ErrorCodes::WORDPRESS_ERROR]
             : ['deleted' => true, 'error' => null];
     }

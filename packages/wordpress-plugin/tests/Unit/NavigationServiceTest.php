@@ -42,17 +42,36 @@ final class NavigationServiceTest extends TestCase
     }
 
     #[Test]
-    public function it_rejects_deleting_non_custom_menu_items(): void
+    public function it_rejects_deleting_menu_items_with_unsupported_types(): void
     {
         $GLOBALS['wp_test_posts'][$this->itemId] = new WP_Post($this->itemId, '', 'nav_menu_item');
         $GLOBALS['wp_test_nav_menu_terms'][$this->itemId] = [$this->menuId];
-        $GLOBALS['wp_test_postmeta'][$this->itemId]['_menu_item_type'] = 'post_type';
+        $GLOBALS['wp_test_postmeta'][$this->itemId]['_menu_item_type'] = 'unsupported';
 
         $result = (new NavigationService())->deleteItem($this->menuId, $this->itemId);
 
         self::assertFalse($result['deleted']);
         self::assertSame(ErrorCodes::INVALID_ARGUMENT, $result['error']);
         self::assertSame([], $GLOBALS['wp_test_delete_post_calls']);
+    }
+
+    #[Test]
+    public function it_deletes_post_and_taxonomy_menu_items(): void
+    {
+        foreach (['post_type', 'taxonomy'] as $type) {
+            $GLOBALS['wp_test_posts'][$this->itemId] = new WP_Post($this->itemId, '', 'nav_menu_item');
+            $GLOBALS['wp_test_nav_menu_terms'][$this->itemId] = [$this->menuId];
+            $GLOBALS['wp_test_postmeta'][$this->itemId]['_menu_item_type'] = $type;
+
+            $result = (new NavigationService())->deleteItem($this->menuId, $this->itemId);
+
+            self::assertTrue($result['deleted'], $type);
+            self::assertNull($result['error'], $type);
+            self::assertSame(
+                ['post_id' => $this->itemId, 'force_delete' => true],
+                $GLOBALS['wp_test_delete_post_calls'][array_key_last($GLOBALS['wp_test_delete_post_calls'])],
+            );
+        }
     }
 
     #[Test]

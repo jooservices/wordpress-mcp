@@ -6,6 +6,48 @@ Independent review rounds 1–3 passed. There are zero open critical or required
 
 ## Finding dispositions
 
+### PR #74 CodeRabbit feedback — local fixes complete, GitHub threads pending
+
+#### F-7 — Unplanned MariaDB major-version change
+
+- **Severity:** Major
+- **Status:** Reverted locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Evidence:** The feature branch changed the dev database image from MariaDB `11.4.13` to `12.3.3` without a database upgrade plan.
+- **Resolution:** Restored `mariadb:11.4.13` and synchronized `docs/ARCHITECTURE.md` and `docs/DEPLOYMENT.md` with the existing dev stack.
+- **Verification:** `docker compose config` and `make e2e-full` passed with the restored image.
+
+#### F-8 — Mixed-mode OAuth errors and bearer challenge
+
+- **Severity:** Major
+- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Evidence:** Malformed/invalid mixed-mode bearer credentials returned 401 without resource metadata; OAuth storage failures were also treated as invalid credentials.
+- **Resolution:** Invalid/expired tokens at the mixed-mode `/mcp` endpoint now use a typed error and return a 401 `WWW-Authenticate` challenge with `resource_metadata`. OAuth state read/parse errors are no longer hidden as empty state, so mixed-mode storage failures return a generic 500 response.
+- **Verification:** MCP body parsing/auth tests passed for malformed bearer, invalid token, storage read failure, and normal OAuth flows; `make ci` passed.
+
+#### F-9 — Comment author fields omitted
+
+- **Severity:** Minor
+- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Evidence:** Comment creation passed only `user_id`, which left the author name/email/URL unspecified.
+- **Resolution:** Resolve the connection user and pass `display_name`, `user_email`, and `user_url` to `wp_new_comment`; reject a missing user as invalid input.
+- **Verification:** Live REST coverage asserts the created comment author matches the authenticated admin user; `make plugin-e2e` passed (23 tests / 197 assertions).
+
+#### F-10 — Object menu items could not be deleted
+
+- **Severity:** Minor
+- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Evidence:** Delete validation only accepted `custom`, although object item creation uses `post_type` and `taxonomy`.
+- **Resolution:** Deletion now accepts those three supported menu item types while retaining post type and menu ownership checks.
+- **Verification:** Unit and live REST tests cover post and taxonomy items; `make ci`, `make plugin-e2e`, and `make e2e-full` passed.
+
+#### F-11 — Default category deletion reported as success
+
+- **Severity:** Minor
+- **Status:** Fixed locally; PR thread remains open until the remediation commit is pushed and replied to.
+- **Evidence:** WordPress returns integer `0` when asked to delete the protected default category; the code treated any result other than `false` or `WP_Error` as success.
+- **Resolution:** Only the documented boolean `true` result is considered successful.
+- **Verification:** Regression unit test covers WordPress's `0` response; `make ci` passed.
+
 ### F-1 — Taxonomy REST scope bypass
 
 - **Severity:** Critical
