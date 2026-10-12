@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { OAuthRegisteredClientsStore } from "@modelcontextprotocol/sdk/server/auth/clients.js";
 import type { AuthorizationParams } from "@modelcontextprotocol/sdk/server/auth/provider.js";
@@ -303,23 +303,25 @@ export class FileOAuthStore implements OAuthRegisteredClientsStore {
   }
 
   private load(): OAuthStateFile {
-    if (!existsSync(this.statePath)) {
-      return emptyStateFile();
-    }
-
+    let raw: string;
     try {
-      const raw = readFileSync(this.statePath, "utf8");
-      const parsed = JSON.parse(raw) as OAuthStateFile;
+      raw = readFileSync(this.statePath, "utf8");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+        return emptyStateFile();
+      }
 
-      return {
-        clients: parsed.clients ?? {},
-        codes: parsed.codes ?? {},
-        accessTokens: parsed.accessTokens ?? {},
-        refreshTokens: parsed.refreshTokens ?? {},
-      };
-    } catch {
-      return emptyStateFile();
+      throw error;
     }
+
+    const parsed = JSON.parse(raw) as OAuthStateFile;
+
+    return {
+      clients: parsed.clients ?? {},
+      codes: parsed.codes ?? {},
+      accessTokens: parsed.accessTokens ?? {},
+      refreshTokens: parsed.refreshTokens ?? {},
+    };
   }
 
   private async persist(): Promise<void> {

@@ -5,9 +5,9 @@ Thank you for considering a contribution to `jooservices/wordpress-mcp`.
 ## Requirements
 
 - Docker with Docker Compose — **all** tooling runs in containers
-- Familiarity with WordPress plugin development (PHP `^8.5`) and TypeScript (Node 24)
+- Familiarity with WordPress plugin development (PHP `^8.3`) and TypeScript (Node 24)
 
-The plugin requires PHP **`^8.5`**. PHP 8.3 and 8.4 hosts are no longer supported.
+The plugin supports PHP **`^8.3`**. CI and Docker E2E run on PHP 8.3, 8.4, and 8.5.
 
 ## Setup
 
@@ -40,14 +40,14 @@ docs: Update ChatGPT connector guide
 
 ```bash
 make ci
-make e2e         # optional local smoke (45 tools)
-make e2e-full    # optional local/nightly full MCP matrix
-make plugin-e2e  # live WordPress plugin REST (no MCP)
+make e2e         # local smoke (53 tools)
+make e2e-full    # local full MCP matrix; also required on PRs
+make plugin-e2e  # local live WordPress plugin REST (no MCP); also required on PRs
 ```
 
 `make ci` runs Pint, PHPCS, PHPStan, PHPMD, PHPUnit (plugin) and TypeScript build + Vitest (MCP server).
 `make e2e` starts Compose and runs `packages/mcp-server/tests/e2e/smoke.test.ts`.
-`make e2e-full` also runs content, media, recovery, resources, and site-ops suites. Full E2E is nightly / manual, not a PR required check.
+`make e2e-full` also runs content, media, recovery, resources, and site-ops suites. The full PHP 8.3–8.5 E2E matrix and the plugin REST matrix run on PRs to `develop` / `master`, pushes to `develop`, nightly, and manual dispatch. Their stable required aggregate checks are `Docker WordPress + MCP` and `WordPress plugin REST`.
 
 **Never bypass hooks with `--no-verify`.**
 

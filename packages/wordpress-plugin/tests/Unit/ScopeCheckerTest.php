@@ -44,6 +44,10 @@ final class ScopeCheckerTest extends TestCase
         self::assertSame('read', ScopeChecker::mapToCapability('terms.read'));
         self::assertSame('moderate_comments', ScopeChecker::mapToCapability('comments.read'));
         self::assertSame('moderate_comments', ScopeChecker::mapToCapability('comments.moderate'));
+        self::assertSame('read', ScopeChecker::mapToCapability('comments.create'));
+        self::assertSame('manage_categories', ScopeChecker::mapToCapability('terms.create'));
+        self::assertSame('manage_categories', ScopeChecker::mapToCapability('terms.update'));
+        self::assertSame('manage_categories', ScopeChecker::mapToCapability('terms.delete'));
         self::assertSame('upload_files', ScopeChecker::mapToCapability('media.upload'));
         self::assertSame('upload_files', ScopeChecker::mapToCapability('media.embed'));
         self::assertSame('activate_plugins', ScopeChecker::mapToCapability('plugins.deactivate'));
@@ -97,5 +101,19 @@ final class ScopeCheckerTest extends TestCase
         self::assertTrue(ScopeChecker::canReadTerms($connection));
         self::assertTrue(ScopeChecker::canReadMedia($connection));
         self::assertFalse(ScopeChecker::canUploadMedia($connection));
+    }
+
+    #[Test]
+    public function it_requires_the_comment_scope_and_read_access_to_supported_content(): void
+    {
+        $GLOBALS['wp_test_posts'][42] = new \WP_Post(42, '', ContentTypes::POST);
+        $GLOBALS['wp_test_posts'][43] = new \WP_Post(43, '', 'attachment');
+
+        self::assertTrue(ScopeChecker::canCreateComment($this->connection(['comments.create']), 42));
+        self::assertFalse(ScopeChecker::canCreateComment($this->connection(['comments.create']), 43));
+        self::assertFalse(ScopeChecker::canCreateComment($this->connection([]), 42));
+        self::assertFalse(ScopeChecker::canCreateComment($this->connection(['comments.create']), 0));
+
+        unset($GLOBALS['wp_test_posts'][42], $GLOBALS['wp_test_posts'][43]);
     }
 }

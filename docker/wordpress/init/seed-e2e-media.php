@@ -79,6 +79,25 @@ if (is_wp_error($postId)) {
     exit(1);
 }
 
+$privateSlug = 'e2e-private-broken-media-reference';
+$existingPrivatePost = get_page_by_path($privateSlug, OBJECT, 'post');
+$privateBrokenId = 999002;
+$privateContent = '<p><img class="wp-image-' . $privateBrokenId . '" src="' . esc_url($src) . '" alt="e2e private broken" /></p>';
+$privatePostId = wp_insert_post([
+    'ID' => $existingPrivatePost instanceof WP_Post ? (int) $existingPrivatePost->ID : 0,
+    'post_type' => 'post',
+    'post_status' => 'private',
+    'post_name' => $privateSlug,
+    'post_title' => 'E2E private broken media reference',
+    'post_content' => $privateContent,
+    'post_author' => 1,
+], true);
+
+if (is_wp_error($privatePostId)) {
+    echo 'Failed to insert private broken-ref post: ' . $privatePostId->get_error_message() . "\n";
+    exit(1);
+}
+
 $commentId = wp_insert_comment([
     'comment_post_ID' => (int) $postId,
     'comment_author' => 'E2E',

@@ -12,13 +12,13 @@ final class PluginRestClient
     ) {
     }
 
-    public static function fromEnvironment(): self
+    public static function fromEnvironment(string $tokenVariable = 'WORDPRESS_CONNECTION_TOKEN'): self
     {
         $url = rtrim((string) getenv('WORDPRESS_URL'), '/');
-        $token = (string) getenv('WORDPRESS_CONNECTION_TOKEN');
+        $token = (string) getenv($tokenVariable);
 
         if ($url === '' || $token === '') {
-            throw new \RuntimeException('WORDPRESS_URL and WORDPRESS_CONNECTION_TOKEN are required.');
+            throw new \RuntimeException(sprintf('WORDPRESS_URL and %s are required.', $tokenVariable));
         }
 
         return new self($url . '/wp-json/chatgpt-connector/v1', $token);

@@ -7,6 +7,13 @@ import { InvalidRequestError } from "@modelcontextprotocol/sdk/server/auth/error
 import { OAUTH_SCOPES } from "./types.js";
 import { FileOAuthStore } from "./store.js";
 
+export class InvalidAccessTokenError extends Error {
+  constructor() {
+    super("Invalid or expired token");
+    this.name = "InvalidAccessTokenError";
+  }
+}
+
 function redirectUriRegistered(client: OAuthClientInformationFull, redirectUri: string): boolean {
   return client.redirect_uris.some((uri) => String(uri) === redirectUri);
 }
@@ -127,7 +134,7 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
   async verifyAccessToken(token: string): Promise<AuthInfo> {
     const tokenData = await this.store.getAccessToken(token);
     if (!tokenData) {
-      throw new Error("Invalid or expired token");
+      throw new InvalidAccessTokenError();
     }
 
     return {

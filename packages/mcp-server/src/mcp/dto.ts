@@ -60,6 +60,7 @@ export type PostTemplateDto = {
 export type CommentDto = {
   id: number;
   post_id: number;
+  parent_id: number;
   author: string;
   content: string;
   status: string;
@@ -70,6 +71,7 @@ export type TermDto = {
   id: number;
   name: string;
   slug: string;
+  taxonomy: string;
 };
 
 export type MediaVerificationDto = {
@@ -275,8 +277,8 @@ const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
     "excerpt",
     "featured_media",
   ]),
-  comment: new Set(["id", "post_id", "author", "content", "status", "created_at"]),
-  term: new Set(["id", "name", "slug"]),
+  comment: new Set(["id", "post_id", "parent_id", "author", "content", "status", "created_at"]),
+  term: new Set(["id", "name", "slug", "taxonomy"]),
   media: new Set(["id", "title", "url", "mime_type", "file_name", "slug_base", "image_type", "created_at", "alt_text", "caption", "description", "verified", "verification"]),
   plugin: new Set(["plugin", "name", "version", "active", "update_available"]),
   theme: new Set(["stylesheet", "name", "version", "active", "update_available"]),

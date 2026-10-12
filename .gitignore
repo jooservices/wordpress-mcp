@@ -12,3 +12,4 @@ coverage/
 pnpm-lock.yaml
 packages/mcp-server/dist/
 **/.phpunit.result.cache
+**/.php-cs-fixer.cache

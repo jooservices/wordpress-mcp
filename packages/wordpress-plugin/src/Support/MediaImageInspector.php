@@ -86,7 +86,6 @@ final class MediaImageInspector
 
             if ($finfo !== false) {
                 $detected = finfo_buffer($finfo, $content);
-                finfo_close($finfo);
 
                 if (is_string($detected) && $detected !== '') {
                     return self::normalizeMime($detected);
