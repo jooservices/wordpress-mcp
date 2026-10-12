@@ -1,12 +1,12 @@
 # jooservices/wordpress-mcp
 
 [![CI](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/jooservices/wordpress-mcp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/jooservices/wordpress-mcp/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp)
-[![Quality gate status](https://sonarcloud.io/api/project_badges/measure?project=jooservices_wordpress-mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_wordpress-mcp)
+[![Coverage (develop)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop/graph/badge.svg)](https://codecov.io/gh/jooservices/wordpress-mcp/branch/develop)
+[![Quality Gate (master)](https://sonarcloud.io/api/project_badges/measure?project=jooservices_wordpress-mcp&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=jooservices_wordpress-mcp)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jooservices/wordpress-mcp/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jooservices/wordpress-mcp)
-[![PHP Version](https://img.shields.io/badge/PHP-8.3%2B-blue.svg)](https://www.php.net/)
-[![Node](https://img.shields.io/badge/Node-24%2B-green.svg)](https://nodejs.org/)
-[![Release](https://img.shields.io/badge/version-1.4.6-blue.svg)](CHANGELOG.md)
+[![PHP Version](https://img.shields.io/badge/PHP-%5E8.3-blue.svg)](https://www.php.net/)
+[![Node](https://img.shields.io/badge/Node-24.x-green.svg)](https://nodejs.org/)
+[![GitHub Release](https://img.shields.io/github/v/release/jooservices/wordpress-mcp?display_name=tag)](https://github.com/jooservices/wordpress-mcp/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; the MCP server calls a scoped WordPress plugin REST API.
@@ -15,13 +15,13 @@ Connect ChatGPT to WordPress via a remote MCP server. ChatGPT calls MCP tools; t
 ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ```
 
-## About v1.4.6
+## About v1.5.0
 
 | | |
 | --- | --- |
-| Status | **v1.4.6 — JOOservices standards, Docker E2E, interactive `make mcp-up`, WP 7 nav + qs fixes** |
-| Packages | `packages/wordpress-plugin` (PHP 8.3) + `packages/mcp-server` (Node 24) |
-| Compatibility | WordPress 6.4+, PHP 8.3+, MariaDB/MySQL as supported by WordPress |
+| Status | **v1.5.0 — Media recovery, site operations, and expanded MCP CI/E2E coverage** |
+| Packages | `packages/wordpress-plugin` (PHP `^8.3`; CI and E2E on PHP 8.3, 8.4, and 8.5) + `packages/mcp-server` (Node 24) |
+| Compatibility | WordPress 6.4+, plugin PHP `^8.3`, MariaDB/MySQL as supported by WordPress |
 | Auth | OAuth 2.1 **Mixed** (default), OAuth-only, static bearer, or disabled (dev) |
 
 ## Features
@@ -38,7 +38,7 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 **MCP server**
 
 - One MCP server → one or many WordPress sites (`WORDPRESS_SITES`)
-- 45 purpose-built tools (content, post templates, media, plugins/themes, users, settings, health, maintenance, revisions, redirects, SEO, observability)
+- 53 purpose-built tools (content, post templates, media, plugins/themes, users, settings, health, maintenance, revisions, redirects, SEO, observability, navigation menus, comments, and taxonomy management)
 - WordPress entities browsable as MCP resources (`wordpress://sites|content|comments|media|terms`)
 - Safety gates: publish transitions, deletion, robots.txt updates, and SEO metadata writes require `confirm: true`; preview diffs with `wordpress_update_content` + `preview: true`
 - Semantic search: filter by author name, category/tag slug, and custom field
@@ -57,8 +57,13 @@ ChatGPT → MCP Server (HTTPS /mcp) → WordPress Plugin → WordPress Core
 ## Requirements
 
 - Docker with Docker Compose (all dev, test, and CI commands)
-- WordPress site with PHP **8.3+**
+- WordPress site with PHP **`^8.3`**. CI and Docker E2E cover PHP 8.3, 8.4, and 8.5.
 - ChatGPT account with Developer Mode (for connector setup)
+
+## Installation
+
+Install and activate the WordPress plugin by following the [WordPress setup guide](docs/WORDPRESS-SETUP.md).
+Configure the MCP server separately using the [deployment guide](docs/DEPLOYMENT.md).
 
 ## Quick start (local)
 
@@ -126,7 +131,9 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | `wordpress_list_comments` | Read |
 | `wordpress_get_comment` | Read |
 | `wordpress_moderate_comment` | Write |
+| `wordpress_create_comment` | Write (create a comment or reply; `confirm: true`) |
 | `wordpress_list_terms` | Read |
+| `wordpress_create_term` / `wordpress_update_term` / `wordpress_delete_term` | Category and tag management (`confirm: true`) |
 | `wordpress_list_media` | Read |
 | `wordpress_get_media` | Read |
 | `wordpress_upload_media` | Write (base64; limits in `wordpress_get_site`) |
@@ -139,6 +146,10 @@ make prod-tunnel      # + ngrok (set NGROK_AUTHTOKEN)
 | `wordpress_get_seo` | Read (`audit: true` for on-site audit) |
 | `wordpress_update_seo` | Write (`apply_fixes: true` for batch; `confirm: true` required) |
 | `wordpress_list_navigation_menus` | Read |
+| `wordpress_get_navigation_menu` | Read (menu items, hierarchy, order, and URLs) |
+| `wordpress_manage_navigation_menu_item` | Write/delete (custom link item CRUD and ordering; `confirm: true`) |
+| `wordpress_add_navigation_menu_object` | Write (add a published page or category to a menu; `confirm: true`) |
+| `wordpress_set_navigation_menu_locations` | Write (replace theme location assignments; `confirm: true`) |
 | `wordpress_set_maintenance_mode` / `wordpress_update_core` | Write (`confirm: true`) |
 | `wordpress_list_revisions` / `wordpress_restore_revision` | Read / write (`confirm: true`) |
 | `wordpress_get_redirects` / `wordpress_manage_redirect` | Redirect/404 read + mutations (`include_not_found_log`; `action: upsert/delete`; `confirm: true`) |
@@ -158,32 +169,6 @@ Clients can browse WordPress entities without calling tools:
 
 Resources share the DTO whitelists and per-tool policy: disabling `wordpress_get_content` (or omitting it from `MCP_ENABLED_TOOLS`) also blocks the `wordpress://content/...` resource.
 
-## Development
-
-```bash
-make install       # composer + npm deps
-tools/install-git-hooks
-make ci            # lint + tests (Docker)
-make test          # unit tests
-make integration   # MCP → WordPress (stack must be up)
-make e2e           # full stack + all 45 MCP tools
-make down          # stop dev stack
-make plugin-release
-```
-
-All commands run in Docker per JOOservices workspace rules.
-
-## Branch model & CI
-
-| Branch | Role |
-|--------|------|
-| `master` | Production releases; tags from here |
-| `develop` | Integration; feature PRs target here |
-
-PRs require green CI: Pint, PHPCS, PHPStan, PHPUnit (plugin) + TypeScript build + Vitest (MCP server), plus commitlint and semantic PR title checks.
-
-See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
-
 ## Documentation
 
 | Doc | Description |
@@ -195,8 +180,25 @@ See [WORKFLOWS.md](WORKFLOWS.md) and [CONTRIBUTING.md](CONTRIBUTING.md).
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md) | MCP server deploy |
 | [CHATGPT-SETUP.md](docs/CHATGPT-SETUP.md) | ChatGPT connector |
 | [OAUTH-EXPLAINED.md](docs/OAUTH-EXPLAINED.md) | OAuth vs. WordPress connection scopes explained |
+| [WORKFLOWS.md](WORKFLOWS.md) | Branch, CI, and Docker workflow details |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
-| [SECURITY.md](SECURITY.md) | Security model |
+
+## Development
+
+```bash
+make install       # composer + npm deps
+tools/install-git-hooks
+make ci            # lint + tests (Docker)
+make test          # unit tests
+make integration   # MCP → WordPress REST (stack must be up)
+make e2e           # Docker WP + plugin + MCP; smoke all 53 tools
+make e2e-full      # full E2E + live integration; override host ports if occupied
+make plugin-e2e    # Docker WP + plugin REST only (no MCP)
+make down          # stop dev stack
+make plugin-release
+```
+
+All commands run in Docker per JOOservices workspace rules.
 
 ## Community
 

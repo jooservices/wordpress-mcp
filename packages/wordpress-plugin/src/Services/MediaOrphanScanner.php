@@ -211,9 +211,11 @@ final class MediaOrphanScanner
         }
 
         $relativePath = ltrim($relativePath, '/');
-        $full = realpath($basedir . '/' . $relativePath);
+        $basedirReal = realpath($basedir);
+        $full = $basedirReal !== false ? realpath($basedirReal . '/' . $relativePath) : false;
+        $prefix = $basedirReal !== false ? rtrim($basedirReal, '/') . '/' : '';
 
-        if ($full === false || ! str_starts_with($full, $basedir . '/')) {
+        if ($basedirReal === false || $full === false || $prefix === '/' || ! str_starts_with($full, $prefix)) {
             return false;
         }
 
@@ -271,11 +273,20 @@ final class MediaOrphanScanner
         foreach (is_array($metaRows) ? $metaRows : [] as $row) {
             $meta = @unserialize((string) $row['meta'], ['allowed_classes' => false]);
 
-            if (! is_array($meta) || ! isset($meta['sizes']) || ! is_array($meta['sizes'])) {
+            if (! is_array($meta)) {
                 continue;
             }
 
             $dir = isset($meta['file']) ? dirname((string) $meta['file']) : '.';
+
+            if (isset($meta['original_image']) && is_string($meta['original_image']) && $meta['original_image'] !== '') {
+                $original = $dir !== '.' && $dir !== '' ? $dir . '/' . $meta['original_image'] : $meta['original_image'];
+                $known[ltrim($original, '/')] = true;
+            }
+
+            if (! isset($meta['sizes']) || ! is_array($meta['sizes'])) {
+                continue;
+            }
 
             foreach ($meta['sizes'] as $size) {
                 if (! is_array($size) || ! isset($size['file'])) {

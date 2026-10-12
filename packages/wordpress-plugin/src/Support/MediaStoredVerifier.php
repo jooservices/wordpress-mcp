@@ -174,8 +174,9 @@ final class MediaStoredVerifier
 
         $width = (int) ($metadata['width'] ?? 0);
         $height = (int) ($metadata['height'] ?? 0);
-        $sizes = $metadata['sizes'] ?? null;
 
-        return $width > 0 && $height > 0 && is_array($sizes) && $sizes !== [];
+        // Tiny images often have an empty `sizes` array — WordPress will not
+        // generate intermediate files smaller than registered image sizes.
+        return $width > 0 && $height > 0;
     }
 }

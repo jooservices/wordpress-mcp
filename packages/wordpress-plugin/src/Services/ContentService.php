@@ -14,6 +14,9 @@ use WP_Query;
 
 final class ContentService
 {
+    /** @var list<string> */
+    private const SEARCHABLE_STATUSES = ['publish', 'draft', 'pending', 'private', 'future'];
+
     public function __construct(
         private readonly ContentNormalizer $normalizer = new ContentNormalizer(),
         private readonly PostTemplateResolver $templateResolver = new PostTemplateResolver(),
@@ -28,10 +31,40 @@ final class ContentService
     public function search(array $params): array
     {
         $args = $this->buildQueryArgs($params);
+        $args['perm'] = 'readable';
         $page = (int) ($args['paged'] ?? 1);
         $perPage = (int) ($args['posts_per_page'] ?? 10);
 
-        $query = new WP_Query($args);
+        $query = new WP_Query();
+        $userId = get_current_user_id();
+        $editOthersCapability = $args['post_type'] === ContentTypes::PAGE ? 'edit_others_pages' : 'edit_others_posts';
+
+        if (! user_can($userId, $editOthersCapability)) {
+            $restrictToReadableAuthors = static function (string $where, WP_Query $currentQuery) use ($query, $userId): string {
+                if ($currentQuery !== $query) {
+                    return $where;
+                }
+
+                global $wpdb;
+
+                return $where . $wpdb->prepare(
+                    " AND ({$wpdb->posts}.post_status IN (%s, %s) OR {$wpdb->posts}.post_author = %d)",
+                    'publish',
+                    'private',
+                    $userId,
+                );
+            };
+
+            add_filter('posts_where', $restrictToReadableAuthors, 10, 2);
+            try {
+                $query->query($args);
+            } finally {
+                remove_filter('posts_where', $restrictToReadableAuthors, 10);
+            }
+        } else {
+            $query->query($args);
+        }
+
         $items = [];
 
         foreach ($query->posts as $post) {
@@ -157,7 +190,7 @@ final class ContentService
 
         $status = sanitize_key((string) ($data['status'] ?? 'draft'));
 
-        if ($status === 'publish' && ! $canPublish) {
+        if (in_array($status, ['publish', 'private', 'future'], true) && ! $canPublish) {
             return ['post' => null, 'error' => ErrorCodes::PERMISSION_DENIED];
         }
 
@@ -248,7 +281,7 @@ final class ContentService
         if (array_key_exists('status', $data)) {
             $status = sanitize_key((string) $data['status']);
 
-            if ($status === 'publish' && ! $canPublish) {
+            if (in_array($status, ['publish', 'private', 'future'], true) && ! $canPublish) {
                 return ['post' => null, 'error' => ErrorCodes::PERMISSION_DENIED];
             }
 
@@ -304,11 +337,13 @@ final class ContentService
     private function parseStatuses(mixed $status): array
     {
         if ($status === 'any' || $status === null || $status === '') {
-            return ['publish', 'draft', 'pending', 'private', 'future'];
+            return self::SEARCHABLE_STATUSES;
         }
 
         if (is_string($status)) {
-            return [sanitize_key($status)];
+            $normalized = sanitize_key($status);
+
+            return in_array($normalized, self::SEARCHABLE_STATUSES, true) ? [$normalized] : ['publish'];
         }
 
         return ['publish'];

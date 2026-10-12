@@ -55,7 +55,11 @@ final class ScopeChecker
         'pages.delete',
         'comments.read',
         'comments.moderate',
+        'comments.create',
         'terms.read',
+        'terms.create',
+        'terms.update',
+        'terms.delete',
         'media.read',
         'media.upload',
         'media.embed',
@@ -130,6 +134,19 @@ final class ScopeChecker
         return self::hasScope($connection, 'terms.read');
     }
 
+    public static function canCreateComment(Connection $connection, int $postId): bool
+    {
+        if (! self::hasScope($connection, 'comments.create') || $postId < 1) {
+            return false;
+        }
+
+        $post = get_post($postId);
+
+        return $post instanceof \WP_Post
+            && ContentTypes::isSupported($post->post_type)
+            && user_can($connection->userId, 'read_post', $postId);
+    }
+
     public static function canReadTemplates(Connection $connection, string $type): bool
     {
         if (! ContentTypes::isSupported($type)) {
@@ -186,6 +203,8 @@ final class ScopeChecker
             'pages.publish' => 'publish_pages',
             'pages.delete' => 'delete_pages',
             'comments.read', 'comments.moderate' => 'moderate_comments',
+            'comments.create' => 'read',
+            'terms.create', 'terms.update', 'terms.delete' => 'manage_categories',
             'media.upload' => 'upload_files',
             'media.embed' => 'upload_files',
             'media.update' => 'upload_files',

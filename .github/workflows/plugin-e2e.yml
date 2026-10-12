@@ -1,0 +1,54 @@
+name: Plugin E2E
+
+on:
+  push:
+    branches: [develop]
+  pull_request:
+    branches: [master, develop]
+  workflow_dispatch:
+  schedule:
+    - cron: "47 3 * * *"
+
+concurrency:
+  group: plugin-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-e2e:
+    name: Plugin REST E2E (PHP ${{ matrix.php-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.3", "8.4", "8.5"]
+    env:
+      PHP_IMAGE_VERSION: ${{ matrix.php-version }}
+      WORDPRESS_PHP_VERSION: ${{ matrix.php-version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Plugin live REST
+        run: make plugin-e2e
+
+  required-check:
+    name: WordPress plugin REST
+    if: always()
+    needs: [plugin-e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all PHP matrix jobs to pass
+        env:
+          MATRIX_RESULT: ${{ needs.plugin-e2e.result }}
+        run: |
+          if [[ "$MATRIX_RESULT" != "success" ]]; then
+            echo "Plugin REST E2E matrix result: $MATRIX_RESULT"
+            exit 1
+          fi

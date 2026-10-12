@@ -15,14 +15,18 @@ services:
       retries: 20
 
   wordpress:
-    image: wordpress:php8.3-apache
+    image: wordpress:7.1.3-php${WORDPRESS_PHP_VERSION:-8.5}-apache
     ports:
-      - "8080:80"
+      - "${WORDPRESS_HOST_PORT:-8080}:80"
     environment:
       WORDPRESS_DB_HOST: db
       WORDPRESS_DB_USER: ${WORDPRESS_DB_USER:-wordpress}
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
+      # Default skip keeps `make up` usable when siteurl is localhost:8080 (PHP cannot fetch that).
+      # `make e2e` / `make e2e-full` set E2E_SKIP_PUBLIC_URL=0 and WP_INTERNAL_URL=http://wordpress.
+      E2E_SKIP_PUBLIC_URL: ${E2E_SKIP_PUBLIC_URL:-1}
+      WORDPRESS_CONFIG_EXTRA: ${WORDPRESS_CONFIG_EXTRA:-}
     volumes:
       - wordpress-data:/var/www/html
       - ./packages/wordpress-plugin:/var/www/html/wp-content/plugins/wordpress-chatgpt
@@ -32,7 +36,7 @@ services:
         condition: service_healthy
 
   wp-init:
-    image: wordpress:cli-php8.3
+    image: wordpress:cli-2.12.0-php${WORDPRESS_PHP_VERSION:-8.5}
     user: "33:33"
     environment:
       WORDPRESS_DB_HOST: db
@@ -40,6 +44,9 @@ services:
       WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD:-wordpress}
       WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME:-wordpress}
       WP_DEV_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
+      WP_LIMITED_TOKEN: ${WORDPRESS_LIMITED_CONNECTION_TOKEN:-}
+      WP_INTERNAL_URL: ${WP_INTERNAL_URL:-http://localhost:8080}
+      DISABLE_WP_CRON: ${DISABLE_WP_CRON:-}
     volumes:
       - wordpress-data:/var/www/html
       - ./packages/wordpress-plugin:/var/www/html/wp-content/plugins/wordpress-chatgpt
@@ -54,7 +61,7 @@ services:
       context: ./packages/mcp-server
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      - "${MCP_HOST_PORT:-3000}:3000"
     environment:
       WORDPRESS_URL: http://wordpress
       WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
@@ -71,7 +78,9 @@ services:
     build:
       context: ./packages/wordpress-plugin
       dockerfile: Dockerfile
-    image: jooservices/wordpress-mcp-plugin:php83
+      args:
+        PHP_VERSION: ${PHP_IMAGE_VERSION:-8.5.11}
+    image: jooservices/wordpress-mcp-plugin:php${PHP_IMAGE_VERSION:-8.5.11}
     working_dir: /app/packages/wordpress-plugin
     volumes:
       - .:/app
@@ -79,7 +88,7 @@ services:
     tty: true
 
   node:
-    image: node:24-bookworm-slim
+    image: node:24.21.0-bookworm-slim
     working_dir: /app/packages/mcp-server
     volumes:
       - .:/app
@@ -88,7 +97,7 @@ services:
     profiles: ["ci"]
 
   integration:
-    image: node:24-bookworm-slim
+    image: node:24.21.0-bookworm-slim
     working_dir: /app/packages/mcp-server
     volumes:
       - .:/app
@@ -98,25 +107,26 @@ services:
       WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
       MCP_URL: http://mcp:3000
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
-    command: sh -c "npm ci && npm test -- tests/integration.test.ts"
+    command: sh -c "npm install --global npm@12.2.0 && npm ci && npm test -- tests/integration.test.ts"
     depends_on:
       mcp:
         condition: service_started
     profiles: ["integration"]
 
   e2e:
-    image: node:24-bookworm-slim
+    image: node:24.21.0-bookworm-slim
     working_dir: /app/packages/mcp-server
     volumes:
       - .:/app
       - mcp-node-modules:/app/packages/mcp-server/node_modules
     environment:
       RUN_E2E: "1"
+      RUN_E2E_FULL: ${RUN_E2E_FULL:-}
       MCP_URL: http://mcp:3000
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
       WORDPRESS_SITE_ID: ${WORDPRESS_SITE_ID:-default}
       NODE_OPTIONS: --max-old-space-size=512
-    command: sh -c "if [ ! -x node_modules/.bin/vitest ]; then npm ci; fi && npm test -- tests/e2e.test.ts"
+    command: sh -c "npm install --global npm@12.2.0 && if [ ! -x node_modules/.bin/vitest ]; then npm ci; fi && npm test -- tests/e2e --fileParallelism=false"
     depends_on:
       mcp:
         condition: service_started

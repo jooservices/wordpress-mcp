@@ -3,8 +3,37 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+HOOK_ARGS=()
+while (($#)); do
+  case "$1" in
+    --configuration=*) shift ;;
+    --configuration)
+      shift
+      if (($#)); then shift; fi
+      ;;
+    --bootstrap=*) shift ;;
+    --bootstrap)
+      shift
+      if (($#)); then shift; fi
+      ;;
+    *)
+      HOOK_ARGS+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if command -v php >/dev/null 2>&1 \
+  && php -r 'if (version_compare(PHP_VERSION, "8.5", "<") || version_compare(PHP_VERSION, "9.0", ">=")) { exit(1); }' \
+  && [ -x packages/wordpress-plugin/vendor/bin/captainhook ]; then
+  exec packages/wordpress-plugin/vendor/bin/captainhook \
+    --configuration=packages/wordpress-plugin/captainhook.json \
+    --bootstrap=vendor/autoload.php \
+    "${HOOK_ARGS[@]}"
+fi
+
 exec docker compose run --rm --no-deps -w /app php \
   packages/wordpress-plugin/vendor/bin/captainhook \
-  --configuration=/app/captainhook.json \
-  --bootstrap=packages/wordpress-plugin/vendor/autoload.php \
-  "$@"
+  --configuration=/app/packages/wordpress-plugin/captainhook.json \
+  --bootstrap=vendor/autoload.php \
+  "${HOOK_ARGS[@]}"

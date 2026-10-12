@@ -202,9 +202,23 @@ if (! function_exists('apply_filters')) {
 }
 
 if (! function_exists('user_can')) {
-    function user_can(int $userId, string $capability): bool
+    function user_can(int $userId, string $capability, mixed ...$args): bool
     {
         return (bool) ($GLOBALS['wp_test_user_caps'][$userId][$capability] ?? true);
+    }
+}
+
+if (! function_exists('get_current_user_id')) {
+    function get_current_user_id(): int
+    {
+        return (int) ($GLOBALS['wp_test_current_user_id'] ?? 1);
+    }
+}
+
+if (! function_exists('current_user_can')) {
+    function current_user_can(string $capability, mixed ...$args): bool
+    {
+        return user_can(get_current_user_id(), $capability, ...$args);
     }
 }
 
@@ -239,6 +253,8 @@ if (! class_exists('WP_Post')) {
         public string $post_status = 'publish';
 
         public string $post_type = 'post';
+
+        public int $menu_order = 0;
 
         public function __construct(int $id, string $content = '', string $type = 'post')
         {
@@ -299,6 +315,13 @@ if (! function_exists('get_post_meta')) {
         }
 
         return true;
+    }
+}
+
+if (! function_exists('esc_url_raw')) {
+    function esc_url_raw(string $url): string
+    {
+        return filter_var($url, FILTER_SANITIZE_URL) ?: '';
     }
 }
 
@@ -411,9 +434,66 @@ if (! function_exists('wp_get_attachment_metadata')) {
 }
 
 if (! function_exists('get_the_title')) {
-    function get_the_title(int $postId): string
+    function get_the_title(int|WP_Post $post): string
     {
+        $postId = $post instanceof WP_Post ? $post->ID : $post;
+
         return (string) ($GLOBALS['wp_test_post_titles'][$postId] ?? '');
+    }
+}
+
+if (! function_exists('get_permalink')) {
+    function get_permalink(int|WP_Post $post): string
+    {
+        $postId = $post instanceof WP_Post ? $post->ID : $post;
+
+        return 'https://example.test/?p=' . $postId;
+    }
+}
+
+if (! function_exists('wp_strip_all_tags')) {
+    function wp_strip_all_tags(string $text): string
+    {
+        return strip_tags($text);
+    }
+}
+
+if (! function_exists('wp_trim_words')) {
+    function wp_trim_words(string $text, int $numWords = 55, string $more = '…'): string
+    {
+        $words = preg_split('/\s+/', trim($text)) ?: [];
+
+        return count($words) <= $numWords ? implode(' ', $words) : implode(' ', array_slice($words, 0, $numWords)) . $more;
+    }
+}
+
+if (! function_exists('get_userdata')) {
+    function get_userdata(int $userId): mixed
+    {
+        return $GLOBALS['wp_test_users'][$userId] ?? null;
+    }
+}
+
+if (! function_exists('wp_set_current_user')) {
+    function wp_set_current_user(int $userId): int
+    {
+        $GLOBALS['wp_test_current_user'] = $userId;
+
+        return $userId;
+    }
+}
+
+if (! function_exists('current_time')) {
+    function current_time(string $type, bool $gmt = false): string
+    {
+        return '2026-01-01 00:00:00';
+    }
+}
+
+if (! function_exists('get_the_terms')) {
+    function get_the_terms(WP_Post $post, string $taxonomy): array|false
+    {
+        return $GLOBALS['wp_test_post_terms'][$post->ID][$taxonomy] ?? false;
     }
 }
 
@@ -453,7 +533,18 @@ if (! function_exists('wp_remote_retrieve_body')) {
 if (! function_exists('is_wp_error')) {
     function is_wp_error(mixed $thing): bool
     {
-        return false;
+        return $thing instanceof WP_Error;
+    }
+}
+
+if (! class_exists('WP_Error')) {
+    class WP_Error
+    {
+        public function __construct(
+            public string $code = '',
+            public string $message = '',
+        ) {
+        }
     }
 }
 
@@ -547,6 +638,8 @@ if (! class_exists('WP_Term')) {
     {
         public int $term_id;
 
+        public string $name = '';
+
         public string $slug;
 
         public function __construct(int $termId, string $slug)
@@ -557,6 +650,91 @@ if (! class_exists('WP_Term')) {
     }
 }
 
+if (! function_exists('wp_get_nav_menu_object')) {
+    /** @var array<int, WP_Term> $GLOBALS['wp_test_nav_menus'] */
+    $GLOBALS['wp_test_nav_menus'] = [];
+
+    function wp_get_nav_menu_object(int $menuId): WP_Term|false
+    {
+        return $GLOBALS['wp_test_nav_menus'][$menuId] ?? false;
+    }
+}
+
+if (! function_exists('wp_get_nav_menu_items')) {
+    /** @return list<WP_Post> */
+    function wp_get_nav_menu_items(int|WP_Term $menu): array
+    {
+        $menuId = $menu instanceof WP_Term ? $menu->term_id : $menu;
+        $items = [];
+
+        foreach ($GLOBALS['wp_test_posts'] ?? [] as $post) {
+            if (
+                $post instanceof WP_Post
+                && $post->post_type === 'nav_menu_item'
+                && has_term($menuId, 'nav_menu', $post->ID)
+            ) {
+                $items[] = $post;
+            }
+        }
+
+        usort($items, static fn(WP_Post $left, WP_Post $right): int => $left->menu_order <=> $right->menu_order);
+
+        return $items;
+    }
+}
+
+if (! function_exists('wp_delete_post')) {
+    /** @var list<array{post_id: int, force_delete: bool}> $GLOBALS['wp_test_delete_post_calls'] */
+    $GLOBALS['wp_test_delete_post_calls'] = [];
+
+    function wp_delete_post(int $postId, bool $forceDelete = false): WP_Post|false
+    {
+        $GLOBALS['wp_test_delete_post_calls'][] = ['post_id' => $postId, 'force_delete' => $forceDelete];
+
+        return $GLOBALS['wp_test_posts'][$postId] ?? false;
+    }
+}
+
+if (! function_exists('has_term')) {
+    /** @var array<int, list<int>> $GLOBALS['wp_test_nav_menu_terms'] */
+    $GLOBALS['wp_test_nav_menu_terms'] = [];
+
+    function has_term(int $term, string $taxonomy, int $postId): bool
+    {
+        return in_array($term, $GLOBALS['wp_test_nav_menu_terms'][$postId] ?? [], true);
+    }
+}
+
+if (! function_exists('wp_update_nav_menu_item')) {
+    $GLOBALS['wp_test_nav_menu_update_calls'] = 0;
+
+    function wp_update_nav_menu_item(int $menuId, int $menuItemDbId, array $menuItemData): int|WP_Error
+    {
+        $GLOBALS['wp_test_nav_menu_update_calls']++;
+
+        if ($GLOBALS['wp_test_nav_menu_update_error'] ?? false) {
+            return new WP_Error('menu_item_failed', 'Unable to save menu item.');
+        }
+
+        $id = $menuItemDbId > 0 ? $menuItemDbId : (int) ($GLOBALS['wp_test_next_nav_menu_item_id'] ?? 1);
+        if ($menuItemDbId === 0) {
+            $GLOBALS['wp_test_next_nav_menu_item_id'] = $id + 1;
+        }
+
+        $post = $GLOBALS['wp_test_posts'][$id] ?? new WP_Post($id, '', 'nav_menu_item');
+        $post->post_type = 'nav_menu_item';
+        $post->post_title = (string) ($menuItemData['menu-item-title'] ?? '');
+        $post->menu_order = (int) ($menuItemData['menu-item-position'] ?? 0);
+        $GLOBALS['wp_test_posts'][$id] = $post;
+        $GLOBALS['wp_test_nav_menu_terms'][$id] = [$menuId];
+        $GLOBALS['wp_test_postmeta'][$id]['_menu_item_type'] = 'custom';
+        $GLOBALS['wp_test_postmeta'][$id]['_menu_item_url'] = (string) ($menuItemData['menu-item-url'] ?? '');
+        $GLOBALS['wp_test_postmeta'][$id]['_menu_item_menu_item_parent'] = (string) ($menuItemData['menu-item-parent-id'] ?? 0);
+
+        return $id;
+    }
+}
+
 if (! function_exists('get_term')) {
     /** @var array<int, WP_Term> $GLOBALS['wp_test_terms'] */
     $GLOBALS['wp_test_terms'] = [];
@@ -564,6 +742,18 @@ if (! function_exists('get_term')) {
     function get_term(int $termId, string $taxonomy): WP_Term|false
     {
         return $GLOBALS['wp_test_terms'][$termId] ?? false;
+    }
+}
+
+if (! function_exists('wp_delete_term')) {
+    $GLOBALS['wp_test_delete_term_result'] = true;
+    $GLOBALS['wp_test_delete_term_calls'] = [];
+
+    function wp_delete_term(int $termId, string $taxonomy): bool|int|WP_Error
+    {
+        $GLOBALS['wp_test_delete_term_calls'][] = ['term_id' => $termId, 'taxonomy' => $taxonomy];
+
+        return $GLOBALS['wp_test_delete_term_result'] ?? true;
     }
 }
 
@@ -584,15 +774,20 @@ if (! function_exists('get_post_modified_time')) {
 }
 
 if (! function_exists('get_post_time')) {
-    function get_post_time(string $format, bool $gmt, int $postId): string
+    function get_post_time(string $format, bool $gmt, int|WP_Post $post): string
     {
         return '2026-01-01T00:00:00+00:00';
     }
 }
 
 if (! function_exists('wp_update_post')) {
-    function wp_update_post(array $postarr): int
+    function wp_update_post(array $postarr): int|WP_Error
     {
+        $GLOBALS['wp_test_post_update_calls'] = (int) ($GLOBALS['wp_test_post_update_calls'] ?? 0) + 1;
+        if (($GLOBALS['wp_test_post_update_error_on_call'] ?? null) === $GLOBALS['wp_test_post_update_calls']) {
+            return new WP_Error('post_update_failed', 'Unable to update post.');
+        }
+
         $id = (int) ($postarr['ID'] ?? 0);
         $post = get_post($id);
 
@@ -619,6 +814,10 @@ if (! function_exists('wp_update_post')) {
         if (isset($postarr['post_content'])) {
             $post->post_content = (string) $postarr['post_content'];
             $GLOBALS['wp_test_post_fields'][$id]['post_content'] = $post->post_content;
+        }
+
+        if (isset($postarr['menu_order'])) {
+            $post->menu_order = (int) $postarr['menu_order'];
         }
 
         return $id;
@@ -702,6 +901,11 @@ if (! class_exists('wpdb')) {
 
         public string $postmeta = 'wp_postmeta';
 
+        public string $terms = 'wp_terms';
+
+        /** @var list<string> */
+        public array $queries = [];
+
         public function prepare(string $query, mixed ...$args): string
         {
             if (count($args) === 1 && is_array($args[0])) {
@@ -720,6 +924,14 @@ if (! class_exists('wpdb')) {
 
         public function get_var(string $query): ?string
         {
+            $this->queries[] = $query;
+
+            if (preg_match('/SELECT term_id FROM wp_terms WHERE term_id = (\d+) FOR UPDATE/', $query, $menuMatch)) {
+                $menuId = (int) $menuMatch[1];
+
+                return isset($GLOBALS['wp_test_nav_menus'][$menuId]) ? (string) $menuId : null;
+            }
+
             if (! preg_match("/meta_key = '([^']*)' AND meta_value = '(.*)' (?:ORDER BY post_id ASC )?LIMIT 1/s", $query, $m)) {
                 return null;
             }
@@ -742,6 +954,39 @@ if (! class_exists('wpdb')) {
             sort($matches);
 
             return (string) $matches[0];
+        }
+
+        public function query(string $query): int|false
+        {
+            $this->queries[] = $query;
+
+            if ($query === 'START TRANSACTION') {
+                $GLOBALS['wp_test_transaction_snapshot'] = unserialize(serialize([
+                    'posts' => $GLOBALS['wp_test_posts'] ?? [],
+                    'postmeta' => $GLOBALS['wp_test_postmeta'] ?? [],
+                    'terms' => $GLOBALS['wp_test_nav_menu_terms'] ?? [],
+                ]));
+
+                return 0;
+            }
+
+            if ($query === 'ROLLBACK') {
+                $snapshot = $GLOBALS['wp_test_transaction_snapshot'] ?? [];
+                $GLOBALS['wp_test_posts'] = $snapshot['posts'] ?? [];
+                $GLOBALS['wp_test_postmeta'] = $snapshot['postmeta'] ?? [];
+                $GLOBALS['wp_test_nav_menu_terms'] = $snapshot['terms'] ?? [];
+                unset($GLOBALS['wp_test_transaction_snapshot']);
+
+                return 0;
+            }
+
+            if ($query === 'COMMIT') {
+                unset($GLOBALS['wp_test_transaction_snapshot']);
+
+                return 0;
+            }
+
+            return false;
         }
 
         /**

@@ -1,4 +1,4 @@
-.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e logs plugin-release mcp-up mcp-down prod-up prod-https prod-tunnel prod-down prod-logs
+.PHONY: up down build install ci test test-php test-mcp lint shell-php shell-mcp integration e2e e2e-full plugin-e2e logs plugin-release mcp-up mcp-down prod-up prod-https prod-tunnel prod-down prod-logs
 
 DOCKER_COMPOSE ?= docker compose
 PHP = $(DOCKER_COMPOSE) run --rm php
@@ -26,7 +26,7 @@ install:
 ci: build
 	$(PHP) composer install --no-interaction --no-scripts
 	$(PHP) composer ci
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm ci && npm run ci"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24.21.0-bookworm-slim sh -c "npm install --global npm@12.2.0 && npm ci && npm run ci"
 
 test: test-php test-mcp
 
@@ -34,11 +34,11 @@ test-php:
 	$(PHP) composer test
 
 test-mcp:
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm ci && npm test"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24.21.0-bookworm-slim sh -c "npm install --global npm@12.2.0 && npm ci && npm test"
 
 lint:
 	$(PHP) composer lint:all
-	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24-bookworm-slim sh -c "npm ci && npm run lint"
+	docker run --rm -v "$(PWD)/packages/mcp-server:/app" -w /app node:24.21.0-bookworm-slim sh -c "npm install --global npm@12.2.0 && npm ci && npm run lint"
 
 integration:
 	$(DOCKER_COMPOSE) --profile integration run --rm integration
@@ -46,6 +46,14 @@ integration:
 e2e:
 	chmod +x scripts/e2e.sh
 	./scripts/e2e.sh
+
+e2e-full:
+	chmod +x scripts/e2e.sh
+	E2E_FULL=1 ./scripts/e2e.sh
+
+plugin-e2e:
+	chmod +x scripts/plugin-e2e.sh
+	./scripts/plugin-e2e.sh
 
 shell-php:
 	$(DOCKER_COMPOSE) run --rm php bash

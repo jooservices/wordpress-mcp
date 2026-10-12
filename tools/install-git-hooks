@@ -15,8 +15,9 @@ docker compose run --rm --no-deps -w /app php \
 
 for hook in .git/hooks/*; do
   if [ -f "$hook" ] && grep -q 'vendor/bin/captainhook\|packages/wordpress-plugin/vendor/bin/captainhook' "$hook" 2>/dev/null; then
-    sed -i '' 's|packages/wordpress-plugin/vendor/bin/captainhook|tools/run-captainhook|g' "$hook" 2>/dev/null || true
-    sed -i '' 's|vendor/bin/captainhook|tools/run-captainhook|g' "$hook" 2>/dev/null || true
+    sed -i.bak 's|packages/wordpress-plugin/vendor/bin/captainhook|tools/run-captainhook|g' "$hook"
+    sed -i.bak 's|vendor/bin/captainhook|tools/run-captainhook|g' "$hook"
+    rm -f "$hook.bak"
   fi
 done
 

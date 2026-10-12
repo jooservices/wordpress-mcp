@@ -23,7 +23,8 @@ final class PostTemplateService
 
         $args = [
             'post_type' => PostTemplateTypes::POST_TYPE,
-            'post_status' => PostTemplateTypes::ACTIVE_STATUSES,
+            'post_status' => $this->queryableStatuses(),
+            'perm' => 'readable',
             'posts_per_page' => $perPage,
             'paged' => $page,
             'orderby' => 'title',
@@ -41,7 +42,7 @@ final class PostTemplateService
         $items = [];
 
         foreach ($query->posts as $post) {
-            if ($post instanceof WP_Post) {
+            if ($post instanceof WP_Post && $this->canRead($post)) {
                 $items[] = $this->summary($post);
             }
         }
@@ -83,7 +84,10 @@ final class PostTemplateService
             return null;
         }
 
-        if (! in_array($post->post_status, PostTemplateTypes::ACTIVE_STATUSES, true)) {
+        if (
+            ! in_array($post->post_status, PostTemplateTypes::ACTIVE_STATUSES, true)
+            || ! $this->canRead($post)
+        ) {
             return null;
         }
 
@@ -100,14 +104,15 @@ final class PostTemplateService
 
         $query = new WP_Query([
             'post_type' => PostTemplateTypes::POST_TYPE,
-            'post_status' => PostTemplateTypes::ACTIVE_STATUSES,
+            'post_status' => $this->queryableStatuses(),
+            'perm' => 'readable',
             'name' => $slug,
             'posts_per_page' => 1,
         ]);
 
         $post = $query->posts[0] ?? null;
 
-        return $post instanceof WP_Post ? $post : null;
+        return $post instanceof WP_Post && $this->canRead($post) ? $post : null;
     }
 
     public function isValidForType(?WP_Post $template, string $contentType): bool
@@ -126,7 +131,8 @@ final class PostTemplateService
     {
         $query = new WP_Query([
             'post_type' => PostTemplateTypes::POST_TYPE,
-            'post_status' => PostTemplateTypes::ACTIVE_STATUSES,
+            'post_status' => $this->queryableStatuses(),
+            'perm' => 'readable',
             'posts_per_page' => -1,
             'orderby' => 'ID',
             'order' => 'ASC',
@@ -139,7 +145,7 @@ final class PostTemplateService
         $posts = [];
 
         foreach ($query->posts as $post) {
-            if ($post instanceof WP_Post) {
+            if ($post instanceof WP_Post && $this->canRead($post)) {
                 $posts[] = $post;
             }
         }
@@ -256,6 +262,25 @@ final class PostTemplateService
             'match_title_keywords' => $this->matchTitleKeywords($post),
             'updated_at' => get_post_modified_time('c', true, $post),
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function queryableStatuses(): array
+    {
+        $statuses = ['publish', 'draft'];
+
+        if (current_user_can('read_private_posts')) {
+            $statuses[] = 'private';
+        }
+
+        return $statuses;
+    }
+
+    private function canRead(WP_Post $post): bool
+    {
+        return user_can(get_current_user_id(), 'read_post', $post->ID);
     }
 
     private function forType(WP_Post $post): string

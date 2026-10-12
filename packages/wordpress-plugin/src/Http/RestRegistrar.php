@@ -26,6 +26,7 @@ use JOOservices\WordPressMcp\Services\RedirectService;
 use JOOservices\WordPressMcp\Services\TaxonomyService;
 use JOOservices\WordPressMcp\Services\ThemeService;
 use JOOservices\WordPressMcp\Services\UserService;
+use JOOservices\WordPressMcp\Support\ContentMediaIds;
 use JOOservices\WordPressMcp\Support\ContentTypes;
 use JOOservices\WordPressMcp\Support\ErrorCodes;
 use WP_Error;
@@ -88,9 +89,16 @@ final class RestRegistrar
         ]);
 
         register_rest_route(self::NAMESPACE, '/comments', [
-            'methods' => 'GET',
-            'callback' => [$this, 'listComments'],
-            'permission_callback' => [$this, 'authenticate'],
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'listComments'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'POST',
+                'callback' => [$this, 'createComment'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
         ]);
 
         register_rest_route(self::NAMESPACE, '/comments/(?P<id>\d+)', [
@@ -107,9 +115,28 @@ final class RestRegistrar
         ]);
 
         register_rest_route(self::NAMESPACE, '/terms', [
-            'methods' => 'GET',
-            'callback' => [$this, 'listTerms'],
-            'permission_callback' => [$this, 'authenticate'],
+            [
+                'methods' => 'GET',
+                'callback' => [$this, 'listTerms'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'POST',
+                'callback' => [$this, 'createTerm'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+        ]);
+        register_rest_route(self::NAMESPACE, '/terms/(?P<id>\d+)', [
+            [
+                'methods' => 'PATCH',
+                'callback' => [$this, 'updateTerm'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
+            [
+                'methods' => 'DELETE',
+                'callback' => [$this, 'deleteTerm'],
+                'permission_callback' => [$this, 'authenticate'],
+            ],
         ]);
 
         register_rest_route(self::NAMESPACE, '/media', [
@@ -186,6 +213,11 @@ final class RestRegistrar
         register_rest_route(self::NAMESPACE, '/navigation/menus/(?P<menu_id>\d+)/items', [
             'methods' => 'POST',
             'callback' => [$this, 'saveMenuItem'],
+            'permission_callback' => [$this, 'authenticate'],
+        ]);
+        register_rest_route(self::NAMESPACE, '/navigation/menus/(?P<menu_id>\d+)/items/object', [
+            'methods' => 'POST',
+            'callback' => [$this, 'addMenuObjectItem'],
             'permission_callback' => [$this, 'authenticate'],
         ]);
         register_rest_route(self::NAMESPACE, '/navigation/menus/(?P<menu_id>\d+)/items/(?P<id>\d+)', [
@@ -436,7 +468,10 @@ final class RestRegistrar
             return RequestContext::invalid('Unsupported content type.');
         }
 
-        if (! $this->canReadType($connection, $post->post_type)) {
+        if (
+            ! $this->canReadType($connection, $post->post_type)
+            || ! user_can($connection->userId, 'read_post', $id)
+        ) {
             return RequestContext::deny();
         }
 
@@ -497,6 +532,14 @@ final class RestRegistrar
 
         if (! ScopeChecker::canCreateContent($connection, $type) || ! ScopeChecker::userCan($connection, $scope)) {
             return RequestContext::deny();
+        }
+
+        if ($this->requestsTemplate($payload)) {
+            $templateScope = $type === ContentTypes::PAGE ? 'pages.templates.read' : 'posts.templates.read';
+
+            if (! ScopeChecker::canReadTemplates($connection, $type) || ! ScopeChecker::userCan($connection, $templateScope)) {
+                return RequestContext::deny();
+            }
         }
 
         if (array_key_exists('featured_media', $payload) && ! $this->canEmbedMedia($connection, $payload['featured_media'])) {
@@ -605,7 +648,11 @@ final class RestRegistrar
         $type = (string) ($template['for_type'] ?? ContentTypes::POST);
         $templateScope = $type === ContentTypes::PAGE ? 'pages.templates.read' : 'posts.templates.read';
 
-        if (! ScopeChecker::canReadTemplates($connection, $type) || ! ScopeChecker::userCan($connection, $templateScope)) {
+        if (
+            ! ScopeChecker::canReadTemplates($connection, $type)
+            || ! ScopeChecker::userCan($connection, $templateScope)
+            || ! user_can($connection->userId, 'read_post', $id)
+        ) {
             return RequestContext::deny();
         }
 
@@ -648,7 +695,11 @@ final class RestRegistrar
         $type = $post->post_type;
         $scope = $type === ContentTypes::PAGE ? 'pages.update' : 'posts.update';
 
-        if (! ScopeChecker::canUpdateContent($connection, $type) || ! ScopeChecker::userCan($connection, $scope)) {
+        if (
+            ! ScopeChecker::canUpdateContent($connection, $type)
+            || ! ScopeChecker::userCan($connection, $scope)
+            || ! user_can($connection->userId, 'edit_post', $id)
+        ) {
             return RequestContext::deny();
         }
 
@@ -726,7 +777,11 @@ final class RestRegistrar
         $type = $post->post_type;
         $scope = $type === ContentTypes::PAGE ? 'pages.delete' : 'posts.delete';
 
-        if (! ScopeChecker::canDeleteContent($connection, $type) || ! ScopeChecker::userCan($connection, $scope)) {
+        if (
+            ! ScopeChecker::canDeleteContent($connection, $type)
+            || ! ScopeChecker::userCan($connection, $scope)
+            || ! user_can($connection->userId, 'delete_post', $id)
+        ) {
             return RequestContext::deny();
         }
 
@@ -1049,6 +1104,65 @@ final class RestRegistrar
         return new WP_REST_Response($result);
     }
 
+    public function createComment(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $payload = $request->get_json_params();
+        if (
+            ! is_array($payload)
+            || ! isset($payload['post_id'], $payload['content'])
+            || ! is_int($payload['post_id'])
+            || ! is_string($payload['content'])
+            || (array_key_exists('parent_id', $payload) && ! is_int($payload['parent_id']))
+        ) {
+            return RequestContext::invalid('post_id and content are required; parent_id must be an integer when provided.');
+        }
+
+        $postId = $payload['post_id'];
+        if (! ScopeChecker::canCreateComment($connection, $postId)) {
+            return RequestContext::deny();
+        }
+
+        $parentId = $payload['parent_id'] ?? 0;
+        $result = (new CommentService())->create($postId, $payload['content'], $parentId, $connection->userId);
+        $audit = new AuditLogger();
+        if ($result['error'] !== null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'create',
+                'comment',
+                null,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 500;
+            $err = ErrorCodes::error($result['error'], 'Failed to create comment.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $commentId = (string) ($result['comment']['id'] ?? '');
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'create',
+            'comment',
+            $commentId,
+            true,
+            ['post_id' => $postId, 'parent_id' => $parentId],
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result['comment'], 201);
+    }
+
     public function getComment(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
         $startedAt = microtime(true);
@@ -1157,7 +1271,17 @@ final class RestRegistrar
             return RequestContext::deny();
         }
 
-        $items = (new TaxonomyService())->list($request->get_params());
+        $params = $request->get_params();
+        $rawTaxonomy = $request->get_param('taxonomy');
+        if ($rawTaxonomy !== null && ! is_string($rawTaxonomy)) {
+            return RequestContext::invalid('taxonomy must be a supported taxonomy name.');
+        }
+        $taxonomy = sanitize_key($rawTaxonomy ?? 'category');
+        if (! in_array($taxonomy, TaxonomyService::SUPPORTED_TAXONOMIES, true)) {
+            return RequestContext::invalid('Unsupported taxonomy. Use category or post_tag.');
+        }
+        $params['taxonomy'] = $taxonomy;
+        $items = (new TaxonomyService())->list($params);
 
         (new AuditLogger())->log(
             $connection->id,
@@ -1171,6 +1295,178 @@ final class RestRegistrar
         );
 
         return new WP_REST_Response(['items' => $items]);
+    }
+
+    public function createTerm(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+        if (! ScopeChecker::userCan($connection, 'terms.create')) {
+            return RequestContext::deny();
+        }
+
+        $payload = $request->get_json_params();
+        if (
+            ! is_array($payload)
+            || ! isset($payload['taxonomy'], $payload['name'])
+            || ! is_string($payload['taxonomy'])
+            || ! is_string($payload['name'])
+            || (array_key_exists('slug', $payload) && ! is_string($payload['slug']))
+            || (array_key_exists('parent_id', $payload) && ! is_int($payload['parent_id']))
+        ) {
+            return RequestContext::invalid('taxonomy and name are required; slug and parent_id must have valid types.');
+        }
+
+        $result = (new TaxonomyService())->create(
+            sanitize_key($payload['taxonomy']),
+            $payload['name'],
+            $payload['slug'] ?? null,
+            $payload['parent_id'] ?? 0,
+        );
+        $audit = new AuditLogger();
+        if ($result['error'] !== null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'create',
+                'term',
+                null,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 500;
+            $err = ErrorCodes::error($result['error'], 'Failed to create taxonomy term.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $term = $result['term'];
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'create',
+            'term',
+            (string) ($term['id'] ?? ''),
+            true,
+            ['taxonomy' => $term['taxonomy'] ?? $payload['taxonomy']],
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($term, 201);
+    }
+
+    public function updateTerm(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+        if (! ScopeChecker::userCan($connection, 'terms.update')) {
+            return RequestContext::deny();
+        }
+
+        $payload = $request->get_json_params();
+        if (! is_array($payload) || ! isset($payload['taxonomy']) || ! is_string($payload['taxonomy'])) {
+            return RequestContext::invalid('taxonomy is required.');
+        }
+        if (array_key_exists('parent_id', $payload) && ! is_int($payload['parent_id'])) {
+            return RequestContext::invalid('parent_id must be an integer.');
+        }
+        $data = array_intersect_key($payload, array_flip(['name', 'slug']));
+        if (array_key_exists('parent_id', $payload)) {
+            $data['parent'] = $payload['parent_id'];
+        }
+        $result = (new TaxonomyService())->update(
+            (int) $request->get_param('id'),
+            sanitize_key($payload['taxonomy']),
+            $data,
+        );
+        $audit = new AuditLogger();
+        if ($result['error'] !== null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'update',
+                'term',
+                (string) $request->get_param('id'),
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 500;
+            $err = ErrorCodes::error($result['error'], 'Failed to update taxonomy term.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $term = $result['term'];
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'update',
+            'term',
+            (string) ($term['id'] ?? ''),
+            true,
+            ['taxonomy' => $term['taxonomy'] ?? $payload['taxonomy']],
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($term);
+    }
+
+    public function deleteTerm(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->connection($request);
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+        if (! ScopeChecker::userCan($connection, 'terms.delete')) {
+            return RequestContext::deny();
+        }
+
+        $taxonomy = $request->get_param('taxonomy');
+        if (! is_string($taxonomy) || $taxonomy === '') {
+            return RequestContext::invalid('taxonomy is required.');
+        }
+        $taxonomy = sanitize_key($taxonomy);
+        $termId = (int) $request->get_param('id');
+        $result = (new TaxonomyService())->delete($termId, $taxonomy);
+        $audit = new AuditLogger();
+        if ($result['error'] !== null) {
+            $audit->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'delete',
+                'term',
+                (string) $termId,
+                false,
+                ['error' => $result['error']],
+                $this->durationMs($startedAt),
+            );
+            $status = $result['error'] === ErrorCodes::INVALID_ARGUMENT ? 400 : 500;
+            $err = ErrorCodes::error($result['error'], 'Failed to delete taxonomy term.', $status);
+
+            return new WP_Error($err['code'], $err['message'], $err['data']);
+        }
+
+        $audit->log(
+            $connection->id,
+            RequestContext::requestId(),
+            'delete',
+            'term',
+            (string) $termId,
+            true,
+            ['taxonomy' => $taxonomy],
+            $this->durationMs($startedAt),
+        );
+
+        return new WP_REST_Response($result);
     }
 
     public function listMedia(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -1249,7 +1545,15 @@ final class RestRegistrar
         }
 
         $postId = $request->get_param('post_id');
-        $result = (new BrokenMediaReferenceScanner())->scan($postId !== null ? (int) $postId : null);
+        $postId = $postId !== null ? (int) $postId : null;
+        if ($postId !== null) {
+            $post = get_post($postId);
+            if ($post instanceof \WP_Post && ! user_can($connection->userId, 'read_post', $postId)) {
+                return RequestContext::deny();
+            }
+        }
+
+        $result = (new BrokenMediaReferenceScanner())->scan($postId);
 
         (new AuditLogger())->log(
             $connection->id,
@@ -1280,6 +1584,21 @@ final class RestRegistrar
 
         $params = $request->get_json_params();
         $payload = is_array($params) ? $params : [];
+        if ($payload === []) {
+            $decoded = json_decode($request->get_body(), true);
+            $payload = is_array($decoded) ? $decoded : [];
+        }
+        $pathLooksLikeRoute = isset($payload['path'])
+            && is_string($payload['path'])
+            && str_starts_with($payload['path'], '/');
+        if (isset($payload['file_path']) && (! isset($payload['path']) || $pathLooksLikeRoute)) {
+            $payload['path'] = $payload['file_path'];
+        }
+
+        if (! $this->canSetFeaturedImage($connection, $payload)) {
+            return RequestContext::deny();
+        }
+
         $result = (new MediaService())->adoptOrphan($payload);
         $audit = new AuditLogger();
 
@@ -1345,6 +1664,11 @@ final class RestRegistrar
 
         $params = $request->get_json_params();
         $payload = is_array($params) ? $params : [];
+
+        if (! $this->canSetFeaturedImage($connection, $payload)) {
+            return RequestContext::deny();
+        }
+
         $result = (new MediaService())->upload($payload);
         $audit = new AuditLogger();
 
@@ -1567,11 +1891,22 @@ final class RestRegistrar
 
     public function getMenu(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
-        if (($denied = $this->requireScope($request, 'appearance.read')) instanceof WP_Error) {
-            return $denied;
+        $startedAt = microtime(true);
+        $connection = $this->requireScope($request, 'appearance.read');
+        if ($connection instanceof WP_Error) {
+            return $connection;
         }
-        $result = (new NavigationService())->get((int) $request->get_param('id'));
-        return $result['error'] === null ? new WP_REST_Response($result['menu']) : RequestContext::invalid('Menu not found.');
+        $id = (int) $request->get_param('id');
+        $result = (new NavigationService())->get($id);
+        if ($result['error'] !== null) {
+            $this->auditNavigation($connection, 'read', 'navigation_menu', $id, false, $result['error'], $startedAt);
+
+            return RequestContext::invalid('Menu not found.');
+        }
+
+        $this->auditNavigation($connection, 'read', 'navigation_menu', $id, true, null, $startedAt);
+
+        return new WP_REST_Response($result['menu']);
     }
 
     public function createMenu(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -1589,36 +1924,170 @@ final class RestRegistrar
 
     public function setMenuLocations(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
-        if (($denied = $this->requireScope($request, 'appearance.update')) instanceof WP_Error) {
-            return $denied;
+        $startedAt = microtime(true);
+        $connection = $this->requireScope($request, 'appearance.update');
+        if ($connection instanceof WP_Error) {
+            return $connection;
         }
         $params = $request->get_json_params();
-        $locations = is_array($params['locations'] ?? null) ? $params['locations'] : [];
-        (new NavigationService())->setLocations(array_map('intval', $locations));
-        /** @phpstan-ignore-next-line WordPress core navigation function is loaded at runtime. */
-        return new WP_REST_Response(['locations' => wp_get_nav_menu_locations()]);
+        if (! is_array($params) || ! array_key_exists('locations', $params) || ! is_array($params['locations'])) {
+            $this->auditNavigation($connection, 'update', 'navigation_locations', null, false, ErrorCodes::INVALID_ARGUMENT, $startedAt);
+
+            return RequestContext::invalid('The locations field must be an object mapping theme location names to menu IDs.');
+        }
+
+        $locations = [];
+        foreach ($params['locations'] as $themeLocation => $menuId) {
+            $validatedMenuId = is_int($menuId) || is_string($menuId)
+                ? filter_var($menuId, FILTER_VALIDATE_INT)
+                : false;
+            if (! is_string($themeLocation) || $themeLocation === '' || $validatedMenuId === false || $validatedMenuId < 0) {
+                $this->auditNavigation(
+                    $connection,
+                    'update',
+                    'navigation_locations',
+                    null,
+                    false,
+                    ErrorCodes::INVALID_ARGUMENT,
+                    $startedAt,
+                );
+
+                return RequestContext::invalid('Each location must have a non-empty name and a non-negative menu ID.');
+            }
+            if ($validatedMenuId > 0 && ! wp_get_nav_menu_object($validatedMenuId) instanceof \WP_Term) {
+                $this->auditNavigation(
+                    $connection,
+                    'update',
+                    'navigation_locations',
+                    null,
+                    false,
+                    ErrorCodes::INVALID_ARGUMENT,
+                    $startedAt,
+                );
+
+                return RequestContext::invalid('A menu location references a menu that does not exist.');
+            }
+
+            $locations[$themeLocation] = $validatedMenuId;
+        }
+
+        $savedLocations = (new NavigationService())->setLocations($locations);
+        $this->auditNavigation($connection, 'update', 'navigation_locations', null, true, null, $startedAt);
+
+        return new WP_REST_Response(['locations' => $savedLocations]);
     }
 
     public function saveMenuItem(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
-        if (($d = $this->requireScope($request, 'appearance.update')) instanceof WP_Error) {
-            return $d;
+        $startedAt = microtime(true);
+        $connection = $this->requireScope($request, 'appearance.update');
+        if ($connection instanceof WP_Error) {
+            return $connection;
         }
         $payload = $request->get_json_params();
+        $menuId = (int) $request->get_param('menu_id');
+        $itemId = $request->get_param('id') ? (int) $request->get_param('id') : null;
         $result = (new NavigationService())->saveItem(
-            (int) $request->get_param('menu_id'),
-            $request->get_param('id') ? (int) $request->get_param('id') : null,
+            $menuId,
+            $itemId,
             is_array($payload) ? $payload : [],
         );
-        return $result['error'] === null ? new WP_REST_Response($result['item']) : RequestContext::invalid('Invalid navigation menu item.');
+        if ($result['error'] !== null) {
+            $this->auditNavigation(
+                $connection,
+                $itemId === null ? 'create' : 'update',
+                'navigation_menu_item',
+                $itemId,
+                false,
+                $result['error'],
+                $startedAt,
+            );
+
+            return RequestContext::invalid('Invalid navigation menu item.');
+        }
+
+        $savedItemId = (int) ($result['item']['id'] ?? $itemId ?? 0);
+        $this->auditNavigation(
+            $connection,
+            $itemId === null ? 'create' : 'update',
+            'navigation_menu_item',
+            $savedItemId,
+            true,
+            null,
+            $startedAt,
+        );
+
+        return new WP_REST_Response($result['item']);
+    }
+
+    public function addMenuObjectItem(WP_REST_Request $request): WP_REST_Response|WP_Error
+    {
+        $startedAt = microtime(true);
+        $connection = $this->requireScope($request, 'appearance.update');
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+
+        $payload = $request->get_json_params();
+        if (
+            ! is_array($payload)
+            || ! isset($payload['object_type'], $payload['object_id'])
+            || ! is_string($payload['object_type'])
+            || ! is_int($payload['object_id'])
+            || (array_key_exists('parent_id', $payload) && ! is_int($payload['parent_id']))
+            || (array_key_exists('position', $payload) && ! is_int($payload['position']))
+            || (array_key_exists('title', $payload) && ! is_string($payload['title']))
+        ) {
+            return RequestContext::invalid('object_type and object_id are required; parent_id, position, and title must have valid types.');
+        }
+
+        $menuId = (int) $request->get_param('menu_id');
+        $result = (new NavigationService())->addObjectItem(
+            $menuId,
+            sanitize_key($payload['object_type']),
+            $payload['object_id'],
+            $payload['parent_id'] ?? 0,
+            $payload['position'] ?? 0,
+            $payload['title'] ?? null,
+        );
+        if ($result['error'] !== null) {
+            $this->auditNavigation(
+                $connection,
+                'create',
+                'navigation_menu_item',
+                null,
+                false,
+                $result['error'],
+                $startedAt,
+            );
+            return RequestContext::invalid('Invalid navigation menu object item.');
+        }
+
+        $itemId = (int) ($result['item']['id'] ?? 0);
+        $this->auditNavigation($connection, 'create', 'navigation_menu_item', $itemId, true, null, $startedAt);
+
+        return new WP_REST_Response($result['item'], 201);
     }
 
     public function deleteMenuItem(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
-        if (($d = $this->requireScope($request, 'appearance.update')) instanceof WP_Error) {
-            return $d;
+        $startedAt = microtime(true);
+        $connection = $this->requireScope($request, 'appearance.update');
+        if ($connection instanceof WP_Error) {
+            return $connection;
         }
-        return new WP_REST_Response((new NavigationService())->deleteItem((int) $request->get_param('id')));
+        $menuId = (int) $request->get_param('menu_id');
+        $itemId = (int) $request->get_param('id');
+        $result = (new NavigationService())->deleteItem($menuId, $itemId);
+        if ($result['error'] !== null) {
+            $this->auditNavigation($connection, 'delete', 'navigation_menu_item', $itemId, false, $result['error'], $startedAt);
+
+            return RequestContext::invalid('Invalid navigation menu item.');
+        }
+
+        $this->auditNavigation($connection, 'delete', 'navigation_menu_item', $itemId, true, null, $startedAt);
+
+        return new WP_REST_Response($result);
     }
 
     public function siteHealth(WP_REST_Request $request): WP_REST_Response|WP_Error
@@ -1664,8 +2133,15 @@ final class RestRegistrar
             return RequestContext::invalid('Content not found.');
         }
         $scope = $post->post_type === ContentTypes::PAGE ? 'pages.revisions.read' : 'posts.revisions.read';
-        if (($denied = $this->requireScope($request, $scope)) instanceof WP_Error) {
-            return $denied;
+        $connection = $this->requireScope($request, $scope);
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+        if (
+            ! ContentTypes::isSupported($post->post_type)
+            || ! user_can($connection->userId, 'read_post', $post->ID)
+        ) {
+            return RequestContext::deny();
         }
         $result = (new RevisionService())->list((int) $post->ID);
         return new WP_REST_Response(['items' => $result['items']]);
@@ -1677,10 +2153,18 @@ final class RestRegistrar
             return RequestContext::invalid('Revision not found.');
         }
         $parent = get_post((int) $result['revision']['parent_id']);
-        $scope = $parent?->post_type === ContentTypes::PAGE ? 'pages.revisions.read' : 'posts.revisions.read';
-        if (($denied = $this->requireScope($request, $scope)) instanceof WP_Error) {
-            return $denied;
-        } return new WP_REST_Response($result['revision']);
+        if (! $parent instanceof \WP_Post || ! ContentTypes::isSupported($parent->post_type)) {
+            return RequestContext::invalid('Revision not found.');
+        }
+        $scope = $parent->post_type === ContentTypes::PAGE ? 'pages.revisions.read' : 'posts.revisions.read';
+        $connection = $this->requireScope($request, $scope);
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+        if (! user_can($connection->userId, 'read_post', $parent->ID)) {
+            return RequestContext::deny();
+        }
+        return new WP_REST_Response($result['revision']);
     }
     public function restoreRevision(WP_REST_Request $request): WP_REST_Response|WP_Error
     {
@@ -1689,9 +2173,12 @@ final class RestRegistrar
             return RequestContext::invalid('Revision not found.');
         }
         $parent = get_post((int) $revision['revision']['parent_id']);
-        $scope = $parent?->post_type === ContentTypes::PAGE ? 'pages.revisions.restore' : 'posts.revisions.restore';
+        if (! $parent instanceof \WP_Post || ! ContentTypes::isSupported($parent->post_type)) {
+            return RequestContext::invalid('Revision not found.');
+        }
+        $scope = $parent->post_type === ContentTypes::PAGE ? 'pages.revisions.restore' : 'posts.revisions.restore';
         $connection = $this->requireScope($request, $scope);
-        if ($connection instanceof WP_Error || ! $parent instanceof \WP_Post || ! user_can($connection->userId, 'edit_post', $parent->ID)) {
+        if ($connection instanceof WP_Error || ! user_can($connection->userId, 'edit_post', $parent->ID)) {
             return $connection instanceof WP_Error ? $connection : RequestContext::deny();
         }
         return new WP_REST_Response((new RevisionService())->restore((int) $request->get_param('id')));
@@ -1883,7 +2370,10 @@ final class RestRegistrar
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
-        if (! $this->canReadType($connection, $post->post_type)) {
+        if (
+            ! $this->canReadType($connection, $post->post_type)
+            || ! user_can($connection->userId, 'read_post', $id)
+        ) {
             return RequestContext::deny();
         }
 
@@ -1921,7 +2411,10 @@ final class RestRegistrar
             return new WP_Error($err['code'], $err['message'], $err['data']);
         }
 
-        if (! $this->canReadType($connection, $post->post_type)) {
+        if (
+            ! $this->canReadType($connection, $post->post_type)
+            || ! user_can($connection->userId, 'read_post', $id)
+        ) {
             return RequestContext::deny();
         }
 
@@ -2059,7 +2552,9 @@ final class RestRegistrar
         $type = $post->post_type;
         $scope = $type === ContentTypes::PAGE ? 'pages.update' : 'posts.update';
 
-        return ScopeChecker::canUpdateContent($connection, $type) && ScopeChecker::userCan($connection, $scope);
+        return ScopeChecker::canUpdateContent($connection, $type)
+            && ScopeChecker::userCan($connection, $scope)
+            && user_can($connection->userId, 'edit_post', $postId);
     }
 
     private function respondToUserMutation(WP_REST_Request $request, string $scope, string $action): WP_REST_Response|WP_Error
@@ -2149,17 +2644,62 @@ final class RestRegistrar
             && user_can($connection->userId, 'edit_post', $id);
     }
 
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function canSetFeaturedImage(Connection $connection, array $payload): bool
+    {
+        if (($payload['set_featured'] ?? false) !== true) {
+            return true;
+        }
+
+        $postId = (int) ($payload['post_id'] ?? 0);
+
+        return $postId <= 0 || user_can($connection->userId, 'edit_post', $postId);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function requestsTemplate(array $payload): bool
+    {
+        if (array_key_exists('template_id', $payload) || array_key_exists('template_slug', $payload)) {
+            return true;
+        }
+
+        return in_array(sanitize_key((string) ($payload['use_template'] ?? '')), ['auto', 'default'], true);
+    }
+
     private function requireScope(WP_REST_Request $request, string $scope): Connection|WP_Error
     {
         $connection = $this->connection($request);
-        return $connection instanceof WP_Error || ! ScopeChecker::userCan($connection, $scope) ? RequestContext::deny() : $connection;
+        if ($connection instanceof WP_Error) {
+            return $connection;
+        }
+        if (! ScopeChecker::userCan($connection, $scope)) {
+            (new AuditLogger())->log(
+                $connection->id,
+                RequestContext::requestId(),
+                'denied',
+                'auth',
+                $request->get_route(),
+                false,
+                ['required_scope' => $scope],
+            );
+
+            return RequestContext::deny();
+        }
+
+        return $connection;
     }
 
     private function menuResponse(WP_REST_Request $request, string $action): WP_REST_Response|WP_Error
     {
+        $startedAt = microtime(true);
         $scope = $action === 'read' ? 'appearance.read' : 'appearance.update';
-        if (($denied = $this->requireScope($request, $scope)) instanceof WP_Error) {
-            return $denied;
+        $connection = $this->requireScope($request, $scope);
+        if ($connection instanceof WP_Error) {
+            return $connection;
         }
         $service = new NavigationService();
         $params = $request->get_json_params();
@@ -2173,8 +2713,23 @@ final class RestRegistrar
             default => ['error' => ErrorCodes::INVALID_ARGUMENT],
         };
         if (($result['error'] ?? null) !== null) {
+            $this->auditNavigation(
+                $connection,
+                $action,
+                'navigation_menu',
+                $id > 0 ? $id : null,
+                false,
+                (string) $result['error'],
+                $startedAt,
+            );
+
             return RequestContext::invalid('Unable to manage navigation menu.');
         }
+
+        $menu = $result['menu'] ?? null;
+        $menuId = is_array($menu) && isset($menu['id']) ? (int) $menu['id'] : ($id > 0 ? $id : null);
+        $this->auditNavigation($connection, $action, 'navigation_menu', $menuId, true, null, $startedAt);
+
         return new WP_REST_Response($result['menu'] ?? ['deleted' => true]);
     }
 
@@ -2185,17 +2740,7 @@ final class RestRegistrar
             return true;
         }
 
-        $matches = [];
-        preg_match_all('/(?:wp-image-|data-id=["\']|"id"\s*:\s*|ids=["\'])(\d+(?:\s*,\s*\d+)*)/', $payload['content'], $matches);
-
-        $ids = [];
-        foreach ($matches[1] as $match) {
-            foreach (preg_split('/\s*,\s*/', $match) ?: [] as $id) {
-                $ids[(int) $id] = true;
-            }
-        }
-
-        foreach (array_keys($ids) as $id) {
+        foreach (ContentMediaIds::fromContent($payload['content']) as $id) {
             if (! $this->canEmbedMedia($connection, $id)) {
                 return false;
             }
@@ -2226,6 +2771,27 @@ final class RestRegistrar
             $action,
             'settings',
             null,
+            $success,
+            $error === null ? null : ['error' => $error],
+            $this->durationMs($startedAt),
+        );
+    }
+
+    private function auditNavigation(
+        Connection $connection,
+        string $action,
+        string $resourceType,
+        ?int $resourceId,
+        bool $success,
+        ?string $error,
+        float $startedAt,
+    ): void {
+        (new AuditLogger())->log(
+            $connection->id,
+            RequestContext::requestId(),
+            $action,
+            $resourceType,
+            $resourceId !== null ? (string) $resourceId : null,
             $success,
             $error === null ? null : ['error' => $error],
             $this->durationMs($startedAt),

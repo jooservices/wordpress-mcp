@@ -40,13 +40,13 @@ describe.skipIf(!runIntegration)("integration", () => {
   });
 
   it("validates plugin-management action requests before changing the site", async () => {
-    const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/activate`, {
+    const response = await fetch(`${wordpressUrl}/wp-json/chatgpt-connector/v1/plugins/state`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${wpToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ plugin: "missing/missing.php" }),
+      body: JSON.stringify({ plugin: "missing/missing.php", enabled: true }),
     });
     expect(response.status).toBe(400);
   });
