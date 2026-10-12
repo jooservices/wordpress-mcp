@@ -52,6 +52,13 @@ let seoMetadata: Record<string, unknown> = {
   og_description: "",
   noindex: false,
 };
+let navigationMenu: Record<string, unknown> = {
+  id: 77,
+  name: "Primary Menu",
+  slug: "primary-menu",
+  items: [{ id: 88, title: "Home", url: "/", parent_id: 0, position: 1, type: "custom", object_id: 0 }],
+};
+let navigationLocations: Record<string, number> = {};
 
 function fetchRouter(input: string, init?: { method?: string; body?: string }) {
   const url = new URL(input);
@@ -124,6 +131,19 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
     return json({ items: [], pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 } });
   }
 
+  if (rel === "/comments" && method === "POST") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    return json({
+      id: 501,
+      post_id: payload.post_id,
+      parent_id: payload.parent_id ?? 0,
+      author: "Admin",
+      content: payload.content,
+      status: "hold",
+      created_at: "2026-01-01T00:00:00",
+    }, 201);
+  }
+
   if (rel === "/media" && method === "GET") {
     return json({ items: [], pagination: { page: 1, per_page: 50, total: 0, total_pages: 0 } });
   }
@@ -150,7 +170,21 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
   }
 
   if (rel === "/terms" && method === "GET") {
-    return json({ items: [{ id: 3, name: "News", slug: "news" }] });
+    return json({ items: [{ id: 3, name: "News", slug: "news", taxonomy: "category" }] });
+  }
+
+  if (rel === "/terms" && method === "POST") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    return json({ id: 4, name: payload.name, slug: payload.slug ?? "created-term", taxonomy: payload.taxonomy }, 201);
+  }
+
+  if (rel === "/terms/3" && method === "PATCH") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    return json({ id: 3, name: payload.name ?? "News", slug: payload.slug ?? "news", taxonomy: payload.taxonomy });
+  }
+
+  if (rel === "/terms/3" && method === "DELETE") {
+    return json({ deleted: true });
   }
 
   if (rel === "/mcp/stats" && method === "GET") {
@@ -192,6 +226,50 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
       items: [{ id: 1, request_id: "abc", action: "read", resource_type: "post", resource_id: "42", success: true, duration_ms: 10, created_at: "2026-01-01 00:00:00" }],
       pagination: { page: 1, per_page: 50, total: 1, total_pages: 1 },
     });
+  }
+
+  if (rel === "/navigation/menus" && method === "GET") {
+    return json({ items: [{ id: navigationMenu.id, name: navigationMenu.name, slug: navigationMenu.slug }], locations: navigationLocations });
+  }
+
+  if (rel === "/navigation/menus/77" && method === "GET") {
+    return json(navigationMenu);
+  }
+
+  if (rel === "/navigation/menus/77/items" && method === "POST") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    const item = { id: 88, ...payload };
+    navigationMenu = { ...navigationMenu, items: [item] };
+    return json(item, 201);
+  }
+
+  if (rel === "/navigation/menus/77/items/object" && method === "POST") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    return json({
+      id: 89,
+      title: payload.title ?? (payload.object_type === "page" ? "Sample page" : "News"),
+      url: payload.object_type === "page" ? "https://abc.com/sample-page/" : "https://abc.com/category/news/",
+      type: payload.object_type,
+      object_id: payload.object_id,
+    }, 201);
+  }
+
+  if (rel === "/navigation/menus/77/items/88" && method === "PATCH") {
+    const payload = JSON.parse(init?.body ?? "{}");
+    const items = navigationMenu.items as Array<Record<string, unknown>>;
+    const item = { ...items[0], ...payload };
+    navigationMenu = { ...navigationMenu, items: [item] };
+    return json(item);
+  }
+
+  if (rel === "/navigation/menus/77/items/88" && method === "DELETE") {
+    navigationMenu = { ...navigationMenu, items: [] };
+    return json({ deleted: true, id: 88 });
+  }
+
+  if (rel === "/navigation/locations" && method === "PATCH") {
+    navigationLocations = JSON.parse(init?.body ?? "{}").locations ?? {};
+    return json({ locations: navigationLocations });
   }
 
   return json({ code: "rest_not_found", message: `No route for ${method} ${rel}` }, 404);
@@ -246,6 +324,13 @@ beforeEach(async () => {
     og_description: "",
     noindex: false,
   };
+  navigationMenu = {
+    id: 77,
+    name: "Primary Menu",
+    slug: "primary-menu",
+    items: [{ id: 88, title: "Home", url: "/", parent_id: 0, position: 1, type: "custom", object_id: 0 }],
+  };
+  navigationLocations = {};
   ctx = await startServer();
 });
 
@@ -772,6 +857,167 @@ describe("SEO tools", () => {
 
     expect(result.isError).toBeUndefined();
     expect((result.structuredContent as Record<string, unknown>).description).toBe("Fixed description");
+  });
+});
+
+describe("navigation menu tools", () => {
+  it("documents WordPress menu position semantics", async () => {
+    const { tools } = await ctx.client.listTools();
+    const itemTool = tools.find((tool) => tool.name === "wordpress_manage_navigation_menu_item");
+    const position = itemTool?.inputSchema.properties?.position as { description?: string } | undefined;
+
+    expect(position?.description).toContain("0 appends");
+    expect(position?.description).toContain("1-based");
+    expect(position?.description).toContain("updates keep the current position");
+  });
+
+  it("reads a menu with its items", async () => {
+    const result = await ctx.client.callTool({ name: "wordpress_get_navigation_menu", arguments: { site: "abc", id: 77 } });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({
+      site: "abc",
+      id: 77,
+      items: [{ id: 88, title: "Home", url: "/", parent_id: 0, position: 1 }],
+    });
+    expect(ctx.calls.some((call) => call.url.endsWith("/navigation/menus/77"))).toBe(true);
+  });
+
+  it("gates and adds an existing page or category to a menu", async () => {
+    const preview = await ctx.client.callTool({
+      name: "wordpress_add_navigation_menu_object",
+      arguments: { site: "abc", menu_id: 77, object_type: "page", object_id: 42 },
+    });
+    expect(preview.isError).toBe(true);
+    expect(preview.structuredContent).toMatchObject({ confirmation_required: true, object_type: "page", object_id: 42 });
+    expect(ctx.calls.some((call) => call.url.endsWith("/navigation/menus/77/items/object"))).toBe(false);
+
+    const added = await ctx.client.callTool({
+      name: "wordpress_add_navigation_menu_object",
+      arguments: { site: "abc", menu_id: 77, object_type: "category", object_id: 3, position: 0, confirm: true },
+    });
+    expect(added.isError).toBeUndefined();
+    expect(added.structuredContent).toMatchObject({ site: "abc", id: 89, type: "category", object_id: 3 });
+    const call = ctx.calls.find((item) => item.url.endsWith("/navigation/menus/77/items/object"));
+    expect(call?.method).toBe("POST");
+  });
+
+  it("gates menu item and location mutations before making HTTP requests", async () => {
+    const item = await ctx.client.callTool({
+      name: "wordpress_manage_navigation_menu_item",
+      arguments: { site: "abc", action: "create", menu_id: 77, title: "About", url: "/about" },
+    });
+    const locations = await ctx.client.callTool({
+      name: "wordpress_set_navigation_menu_locations",
+      arguments: { site: "abc", locations: { primary: 77 } },
+    });
+
+    expect(item.isError).toBe(true);
+    expect(item.structuredContent).toMatchObject({ confirmation_required: true });
+    expect(locations.isError).toBe(true);
+    expect(locations.structuredContent).toMatchObject({ confirmation_required: true });
+    expect(ctx.calls.some((call) => call.url.includes("/navigation/"))).toBe(false);
+  });
+
+  it("creates, updates, reads, reorders, deletes items, and sets location assignments", async () => {
+    const created = await ctx.client.callTool({
+      name: "wordpress_manage_navigation_menu_item",
+      arguments: {
+        site: "abc",
+        action: "create",
+        menu_id: 77,
+        title: "About",
+        url: "/about",
+        parent_id: 0,
+        position: 2,
+        confirm: true,
+      },
+    });
+    expect(created.isError).toBeUndefined();
+    expect(created.structuredContent).toMatchObject({ site: "abc", id: 88, title: "About", url: "/about" });
+
+    const updated = await ctx.client.callTool({
+      name: "wordpress_manage_navigation_menu_item",
+      arguments: {
+        site: "abc",
+        action: "update",
+        menu_id: 77,
+        item_id: 88,
+        title: "About us",
+        url: "/about-us",
+        parent_id: 0,
+        position: 1,
+        confirm: true,
+      },
+    });
+    expect(updated.isError).toBeUndefined();
+
+    const menu = await ctx.client.callTool({ name: "wordpress_get_navigation_menu", arguments: { site: "abc", id: 77 } });
+    expect(menu.structuredContent).toMatchObject({ items: [{ id: 88, title: "About us", url: "/about-us", position: 1 }] });
+
+    const assigned = await ctx.client.callTool({
+      name: "wordpress_set_navigation_menu_locations",
+      arguments: { site: "abc", locations: { primary: 77 }, confirm: true },
+    });
+    expect(assigned.isError).toBeUndefined();
+    expect(assigned.structuredContent).toMatchObject({ locations: { primary: 77 } });
+
+    const deleted = await ctx.client.callTool({
+      name: "wordpress_manage_navigation_menu_item",
+      arguments: { site: "abc", action: "delete", menu_id: 77, item_id: 88, confirm: true },
+    });
+    expect(deleted.isError).toBeUndefined();
+    expect(ctx.calls.map(({ method, url }) => `${method} ${new URL(url).pathname.slice(API_PREFIX.length)}`)).toContain("DELETE /navigation/menus/77/items/88");
+  });
+});
+
+describe("comment and taxonomy tools", () => {
+  it("requires confirmation before creating a comment or reply", async () => {
+    const preview = await ctx.client.callTool({
+      name: "wordpress_create_comment",
+      arguments: { site: "abc", post_id: 42, content: "A test reply", parent_id: 88 },
+    });
+    expect(preview.isError).toBe(true);
+    expect(preview.structuredContent).toMatchObject({ confirmation_required: true, post_id: 42, parent_id: 88 });
+    expect(ctx.calls.some((call) => call.method === "POST" && call.url.endsWith("/comments"))).toBe(false);
+
+    const created = await ctx.client.callTool({
+      name: "wordpress_create_comment",
+      arguments: { site: "abc", post_id: 42, content: "A test reply", parent_id: 88, confirm: true },
+    });
+    expect(created.isError).toBeUndefined();
+    expect(created.structuredContent).toMatchObject({ site: "abc", post_id: 42, parent_id: 88, content: "A test reply" });
+  });
+
+  it("gates and performs category and tag CRUD using the taxonomy allowlist", async () => {
+    const preview = await ctx.client.callTool({
+      name: "wordpress_create_term",
+      arguments: { site: "abc", taxonomy: "category", name: "Guides" },
+    });
+    expect(preview.isError).toBe(true);
+    expect(preview.structuredContent).toMatchObject({ confirmation_required: true, taxonomy: "category", name: "Guides" });
+
+    const created = await ctx.client.callTool({
+      name: "wordpress_create_term",
+      arguments: { site: "abc", taxonomy: "category", name: "Guides", confirm: true },
+    });
+    expect(created.isError).toBeUndefined();
+    expect(created.structuredContent).toMatchObject({ site: "abc", id: 4, name: "Guides", taxonomy: "category" });
+
+    const updated = await ctx.client.callTool({
+      name: "wordpress_update_term",
+      arguments: { site: "abc", id: 3, taxonomy: "category", name: "News & updates", parent_id: 0, confirm: true },
+    });
+    expect(updated.isError).toBeUndefined();
+    expect(updated.structuredContent).toMatchObject({ id: 3, name: "News & updates", taxonomy: "category" });
+
+    const deleted = await ctx.client.callTool({
+      name: "wordpress_delete_term",
+      arguments: { site: "abc", id: 3, taxonomy: "category", confirm: true },
+    });
+    expect(deleted.isError).toBeUndefined();
+    expect(deleted.structuredContent).toMatchObject({ site: "abc", deleted: true });
+    expect(ctx.calls.some((call) => call.url.includes("/terms/3?taxonomy=category"))).toBe(true);
   });
 });
 

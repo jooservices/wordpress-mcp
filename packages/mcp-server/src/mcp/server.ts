@@ -1023,6 +1023,47 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     },
   );
 
+  const createCommentSchema = z.object({
+    site: siteSchema,
+    post_id: z.number().int().positive(),
+    content: z.string().min(1),
+    parent_id: z.number().int().positive().optional(),
+    confirm: z.boolean().optional().default(false),
+  });
+  type CreateCommentArgs = z.infer<typeof createCommentSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_create_comment",
+      title: "Create a WordPress comment or reply",
+      description: "Create a comment on a post or page, or reply to a comment on that content. WordPress comment moderation rules apply. Requires comments.create and confirm: true.",
+      inputSchema: createCommentSchema,
+      access: "write",
+      dto: { kind: "comment" },
+    },
+    async ({ client, siteId, args }: ToolContext<CreateCommentArgs>) => {
+      if (args.content.trim() === "") {
+        return executionError(new Error("content must not be blank."));
+      }
+      if (!args.confirm) {
+        return confirmationRequired(
+          "Creating a comment on post or page #" + args.post_id + " on \"" + siteId + "\" may make it public. Re-run with confirm: true to proceed.",
+          withSiteMeta(siteId, { post_id: args.post_id, parent_id: args.parent_id, content: args.content }),
+        );
+      }
+
+      const { site: _site, confirm: _confirm, ...payload } = args;
+      const comment = await client.post<CommentDto>("/comments", payload);
+      return {
+        content: [{ type: "text", text: args.parent_id ? "Replied to comment #" + args.parent_id + " on site \"" + siteId + "\"." : "Created a comment on site \"" + siteId + "\"." }],
+        structuredContent: withSiteMeta(siteId, comment),
+      };
+    },
+  );
+
   const listTermsSchema = z.object({
     site: siteSchema,
     taxonomy: z.enum(["category", "post_tag"]).optional().default("category"),
@@ -1047,6 +1088,136 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const result = await client.get<{ items: TermDto[] }>("/terms", wpArgs(args));
       return {
         content: [{ type: "text", text: `Found ${result.items.length} term(s) on site "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
+
+  const createTermSchema = z.object({
+    site: siteSchema,
+    taxonomy: z.enum(["category", "post_tag"]),
+    name: z.string().min(1),
+    slug: z.string().optional(),
+    parent_id: z.number().int().min(0).optional(),
+    confirm: z.boolean().optional().default(false),
+  });
+  type CreateTermArgs = z.infer<typeof createTermSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_create_term",
+      title: "Create a WordPress category or tag",
+      description: "Create a category or tag. Categories may have a parent; tags are flat. Requires terms.create and confirm: true.",
+      inputSchema: createTermSchema,
+      access: "write",
+      dto: { kind: "term" },
+    },
+    async ({ client, siteId, args }: ToolContext<CreateTermArgs>) => {
+      if (args.name.trim() === "") {
+        return executionError(new Error("name must not be blank."));
+      }
+      if (args.taxonomy !== "category" && args.parent_id !== undefined) {
+        return executionError(new Error("parent_id is only valid for categories."));
+      }
+      if (!args.confirm) {
+        return confirmationRequired(
+          "Creating a " + (args.taxonomy === "category" ? "category" : "tag") + " on \"" + siteId + "\" changes site taxonomy. Re-run with confirm: true to proceed.",
+          withSiteMeta(siteId, { taxonomy: args.taxonomy, name: args.name, slug: args.slug, parent_id: args.parent_id }),
+        );
+      }
+      const { site: _site, confirm: _confirm, ...payload } = args;
+      const term = await client.post<TermDto>("/terms", payload);
+      return {
+        content: [{ type: "text", text: "Created " + (args.taxonomy === "category" ? "category" : "tag") + " \"" + term.name + "\" on \"" + siteId + "\"." }],
+        structuredContent: withSiteMeta(siteId, term),
+      };
+    },
+  );
+
+  const updateTermSchema = z.object({
+    site: siteSchema,
+    id: z.number().int().positive(),
+    taxonomy: z.enum(["category", "post_tag"]),
+    name: z.string().min(1).optional(),
+    slug: z.string().min(1).optional(),
+    parent_id: z.number().int().min(0).optional(),
+    confirm: z.boolean().optional().default(false),
+  });
+  type UpdateTermArgs = z.infer<typeof updateTermSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_update_term",
+      title: "Update a WordPress category or tag",
+      description: "Update the name, slug, or parent of a category or tag. Requires terms.update and confirm: true.",
+      inputSchema: updateTermSchema,
+      access: "write",
+      dto: { kind: "term" },
+    },
+    async ({ client, siteId, args }: ToolContext<UpdateTermArgs>) => {
+      if (args.name === undefined && args.slug === undefined && args.parent_id === undefined) {
+        return executionError(new Error("At least one of name, slug, or parent_id must be provided."));
+      }
+      if (args.name !== undefined && args.name.trim() === "") {
+        return executionError(new Error("name must not be blank."));
+      }
+      if (args.taxonomy !== "category" && args.parent_id !== undefined) {
+        return executionError(new Error("parent_id is only valid for categories."));
+      }
+      if (!args.confirm) {
+        return confirmationRequired(
+          "Updating taxonomy term #" + args.id + " on \"" + siteId + "\" may change URLs and content classification. Re-run with confirm: true to proceed.",
+          withSiteMeta(siteId, { id: args.id, taxonomy: args.taxonomy, name: args.name, slug: args.slug, parent_id: args.parent_id }),
+        );
+      }
+
+      const { site: _site, id, confirm: _confirm, ...payload } = args;
+      const term = await client.patch<TermDto>("/terms/" + id, payload);
+      return {
+        content: [{ type: "text", text: "Updated taxonomy term #" + id + " on \"" + siteId + "\"." }],
+        structuredContent: withSiteMeta(siteId, term),
+      };
+    },
+  );
+
+  const deleteTermSchema = z.object({
+    site: siteSchema,
+    id: z.number().int().positive(),
+    taxonomy: z.enum(["category", "post_tag"]),
+    confirm: z.boolean().optional().default(false),
+  });
+  type DeleteTermArgs = z.infer<typeof deleteTermSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_delete_term",
+      title: "Delete a WordPress category or tag",
+      description: "Delete a category or tag. WordPress may reassign categorized posts to the default category. Requires terms.delete and confirm: true.",
+      inputSchema: deleteTermSchema,
+      access: "delete",
+    },
+    async ({ client, siteId, args }: ToolContext<DeleteTermArgs>) => {
+      if (!args.confirm) {
+        return confirmationRequired(
+          args.taxonomy === "category"
+            ? "Deleting category #" + args.id + " on \"" + siteId + "\" may reassign posts to the default category. Re-run with confirm: true to proceed."
+            : "Deleting tag #" + args.id + " on \"" + siteId + "\" removes its classification from posts. Re-run with confirm: true to proceed.",
+          withSiteMeta(siteId, { id: args.id, taxonomy: args.taxonomy }),
+        );
+      }
+
+      const result = await client.delete<{ deleted: boolean }>("/terms/" + args.id, { taxonomy: args.taxonomy });
+      return {
+        content: [{ type: "text", text: "Deleted taxonomy term #" + args.id + " on \"" + siteId + "\"." }],
         structuredContent: withSiteMeta(siteId, result),
       };
     },
@@ -1357,6 +1528,163 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
     async ({ client, siteId }: ToolContext<SiteOperationArgs>) => {
       const result = await client.get<Record<string, unknown>>("/navigation/menus");
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) };
+    },
+  );
+
+  const getNavigationMenuSchema = z.object({
+    site: siteSchema,
+    id: z.number().int().positive(),
+  });
+  type GetNavigationMenuArgs = z.infer<typeof getNavigationMenuSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_get_navigation_menu",
+      title: "Get a WordPress navigation menu and its items",
+      description: "Get one navigation menu with its items, hierarchy, order, and URLs. Requires appearance.read.",
+      inputSchema: getNavigationMenuSchema,
+      access: "read",
+    },
+    async ({ client, siteId, args }: ToolContext<GetNavigationMenuArgs>) => {
+      const result = await client.get<Record<string, unknown>>(`/navigation/menus/${args.id}`);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }], structuredContent: withSiteMeta(siteId, result) };
+    },
+  );
+
+  const manageNavigationMenuItemSchema = z.object({
+    site: siteSchema,
+    action: z.enum(["create", "update", "delete"]),
+    menu_id: z.number().int().positive(),
+    item_id: z.number().int().positive().optional().describe("Required for update and delete."),
+    title: z.string().min(1).optional().describe("Required for create and update."),
+    url: z.string().min(1).optional().describe("Required for create and update. Relative paths are allowed."),
+    parent_id: z.number().int().min(0).optional().describe("Parent item ID in this same menu, or 0 for a top-level item."),
+    position: z.number().int().min(0).optional().describe("Menu order: 0 appends; positive positions are 1-based (1 is first). If omitted, creates append and updates keep the current position."),
+    confirm: z.boolean().optional().default(false),
+  });
+  type ManageNavigationMenuItemArgs = z.infer<typeof manageNavigationMenuItemSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_manage_navigation_menu_item",
+      title: "Create, update, reorder, or delete a navigation menu item",
+      description: "Manage custom-link items in a menu. Create and update require title and URL; parent_id must refer to an item in the same menu. Every change requires appearance.update and confirm: true.",
+      inputSchema: manageNavigationMenuItemSchema,
+      access: "delete",
+    },
+    async ({ client, siteId, args }: ToolContext<ManageNavigationMenuItemArgs>) => {
+      if (args.action !== "delete" && (!args.title?.trim() || !args.url?.trim())) {
+        return executionError(new Error("title and url are required for create and update."));
+      }
+      if (args.action !== "create" && !args.item_id) {
+        return executionError(new Error("item_id is required for update and delete."));
+      }
+
+      const actionLabel = args.action === "create" ? "Create menu item" : args.action === "update" ? "Update menu item" : "Delete menu item";
+      if (!args.confirm) {
+        return confirmationRequired(
+          `${actionLabel} in menu #${args.menu_id} on "${siteId}" changes site navigation. Re-run with confirm: true to proceed.`,
+          withSiteMeta(siteId, { action: args.action, menu_id: args.menu_id, item_id: args.item_id, title: args.title, url: args.url, parent_id: args.parent_id, position: args.position }),
+        );
+      }
+
+      const payload = {
+        ...(args.title !== undefined ? { title: args.title } : {}),
+        ...(args.url !== undefined ? { url: args.url } : {}),
+        ...(args.parent_id !== undefined ? { parent_id: args.parent_id } : {}),
+        ...(args.position !== undefined ? { position: args.position } : {}),
+      };
+      const path = `/navigation/menus/${args.menu_id}/items`;
+      const result = args.action === "create"
+        ? await client.post<Record<string, unknown>>(path, payload)
+        : args.action === "update"
+          ? await client.patch<Record<string, unknown>>(`${path}/${args.item_id}`, payload)
+          : await client.delete<Record<string, unknown>>(`${path}/${args.item_id}`);
+
+      return {
+        content: [{ type: "text", text: `${actionLabel} in menu #${args.menu_id} on "${siteId}".` }],
+        structuredContent: withSiteMeta(siteId, result),
+      };
+    },
+  );
+
+  const addNavigationMenuObjectSchema = z.object({
+    site: siteSchema,
+    menu_id: z.number().int().positive(),
+    object_type: z.enum(["page", "category"]),
+    object_id: z.number().int().positive(),
+    title: z.string().optional().describe("Optional display title override; WordPress uses the page or category title when omitted."),
+    parent_id: z.number().int().min(0).optional().describe("Parent item ID in this same menu, or 0 for a top-level item."),
+    position: z.number().int().min(0).optional().describe("0 appends; positive positions are 1-based (1 is first)."),
+    confirm: z.boolean().optional().default(false),
+  });
+  type AddNavigationMenuObjectArgs = z.infer<typeof addNavigationMenuObjectSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_add_navigation_menu_object",
+      title: "Add an existing page or category to a navigation menu",
+      description: "Add a published page or category to a classic navigation menu. Requires appearance.update and confirm: true.",
+      inputSchema: addNavigationMenuObjectSchema,
+      access: "delete",
+    },
+    async ({ client, siteId, args }: ToolContext<AddNavigationMenuObjectArgs>) => {
+      if (!args.confirm) {
+        return confirmationRequired(
+          "Adding a " + args.object_type + " to menu #" + args.menu_id + " on \"" + siteId + "\" changes public navigation. Re-run with confirm: true to proceed.",
+          withSiteMeta(siteId, { menu_id: args.menu_id, object_type: args.object_type, object_id: args.object_id, parent_id: args.parent_id, position: args.position }),
+        );
+      }
+
+      const { site: _site, confirm: _confirm, ...payload } = args;
+      const item = await client.post<Record<string, unknown>>(
+        "/navigation/menus/" + args.menu_id + "/items/object",
+        payload,
+      );
+      return {
+        content: [{ type: "text", text: "Added " + args.object_type + " #" + args.object_id + " to menu #" + args.menu_id + " on \"" + siteId + "\"." }],
+        structuredContent: withSiteMeta(siteId, item),
+      };
+    },
+  );
+
+  const setNavigationMenuLocationsSchema = z.object({
+    site: siteSchema,
+    locations: z.record(z.string(), z.number().int().nonnegative()).describe("Map theme location names to menu IDs. Pass an empty object to clear all assignments."),
+    confirm: z.boolean().optional().default(false),
+  });
+  type SetNavigationMenuLocationsArgs = z.infer<typeof setNavigationMenuLocationsSchema>;
+
+  registerWordPressTool(
+    server,
+    registry,
+    options,
+    {
+      name: "wordpress_set_navigation_menu_locations",
+      title: "Assign menus to theme locations",
+      description: "Set the complete map of theme menu locations to menu IDs; pass an empty object to clear assignments. Requires appearance.update and confirm: true.",
+      inputSchema: setNavigationMenuLocationsSchema,
+      access: "write",
+    },
+    async ({ client, siteId, args }: ToolContext<SetNavigationMenuLocationsArgs>) => {
+      if (!args.confirm) {
+        return confirmationRequired(
+          `Updating theme menu locations on "${siteId}" changes public navigation. Re-run with confirm: true to proceed.`,
+          withSiteMeta(siteId, { locations: args.locations }),
+        );
+      }
+
+      const result = await client.patch<Record<string, unknown>>("/navigation/locations", { locations: args.locations });
+      return { content: [{ type: "text", text: `Updated theme menu locations on "${siteId}".` }], structuredContent: withSiteMeta(siteId, result) };
     },
   );
 

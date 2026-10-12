@@ -1,6 +1,8 @@
 name: E2E
 
 on:
+  push:
+    branches: [develop]
   pull_request:
     branches: [master, develop]
   workflow_dispatch:
@@ -16,9 +18,16 @@ permissions:
 
 jobs:
   e2e:
-    name: Docker WordPress + MCP
+    name: Full E2E (PHP ${{ matrix.php-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.3", "8.4", "8.5"]
+    env:
+      PHP_IMAGE_VERSION: ${{ matrix.php-version }}
+      WORDPRESS_PHP_VERSION: ${{ matrix.php-version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,6 +37,18 @@ jobs:
       - name: Full E2E
         run: make e2e-full
 
-      - name: Compose logs on failure
-        if: failure()
-        run: docker compose logs --tail=120 wordpress mcp wp-init
+  required-check:
+    name: Docker WordPress + MCP
+    if: always()
+    needs: [e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require all PHP matrix jobs to pass
+        env:
+          MATRIX_RESULT: ${{ needs.e2e.result }}
+        run: |
+          if [[ "$MATRIX_RESULT" != "success" ]]; then
+            echo "Full E2E matrix result: $MATRIX_RESULT"
+            exit 1
+          fi

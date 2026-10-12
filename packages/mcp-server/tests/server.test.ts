@@ -40,7 +40,11 @@ const EXPECTED_TOOL_ACCESS: Record<string, "read" | "write" | "delete"> = {
   wordpress_list_comments: "read",
   wordpress_get_comment: "read",
   wordpress_moderate_comment: "write",
+  wordpress_create_comment: "write",
   wordpress_list_terms: "read",
+  wordpress_create_term: "write",
+  wordpress_update_term: "write",
+  wordpress_delete_term: "delete",
   wordpress_list_media: "read",
   wordpress_get_media: "read",
   wordpress_get_media_orphans: "read",
@@ -51,6 +55,10 @@ const EXPECTED_TOOL_ACCESS: Record<string, "read" | "write" | "delete"> = {
   wordpress_delete_media: "delete",
   wordpress_update_site_settings: "write",
   wordpress_list_navigation_menus: "read",
+  wordpress_get_navigation_menu: "read",
+  wordpress_manage_navigation_menu_item: "delete",
+  wordpress_add_navigation_menu_object: "delete",
+  wordpress_set_navigation_menu_locations: "write",
   wordpress_set_maintenance_mode: "write",
   wordpress_update_core: "write",
   wordpress_list_revisions: "read",
@@ -72,7 +80,7 @@ describe("createMcpServer", () => {
       expect(getToolAccess(name)).toBe(access);
     }
 
-    expect(Object.keys(EXPECTED_TOOL_ACCESS).length).toBe(45);
+    expect(Object.keys(EXPECTED_TOOL_ACCESS).length).toBe(53);
     expect(getToolAccess("wordpress_get_site_limits")).toBeUndefined();
   });
 });

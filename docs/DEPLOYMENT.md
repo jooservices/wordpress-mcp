@@ -146,7 +146,7 @@ Build release zip: `make plugin-release`
 
 ## Database
 
-Production WordPress may use MariaDB 11.4 LTS or any supported MySQL/MariaDB version. The dev stack uses `mariadb:11.4.13`.
+Production WordPress may use a supported MariaDB or MySQL version. The dev stack uses the MariaDB 12.3 LTS image `mariadb:12.3.3`.
 
 ## Security checklist
 

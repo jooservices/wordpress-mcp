@@ -1,7 +1,4 @@
-> **Next plugin release:** It will require PHP **`^8.5`**. If your WordPress
-> site runs PHP 8.3 or 8.4, upgrade its PHP runtime to PHP 8.5 or a later
-> compatible PHP 8.x version before updating the plugin. Defer the plugin
-> update until then.
+The plugin supports PHP **`^8.3`**. CI and Docker E2E verify PHP 8.3, 8.4, and 8.5.
 
 # Upgrading to v1.4.0
 
@@ -18,7 +15,7 @@ v1.4.0 adds post templates, a verified media upload pipeline, and consolidates t
 
 1. Deactivate the old plugin only if your deployment method requires it; do not delete the plugin data.
 2. Replace `wp-content/plugins/wordpress-chatgpt` with the v1.4.0 release archive (`make plugin-release` or the GitHub release asset).
-3. From that plugin directory, run `composer install --no-dev --optimize-autoloader` with the server's PHP 8.3 runtime.
+3. From that plugin directory, run `composer install --no-dev --optimize-autoloader` with a supported PHP 8.x runtime (`^8.3`).
 4. Activate the plugin. Its database upgrade hook runs automatically.
 5. In wp-admin, open **JOOservices → MCP**. Verify existing connections. Optionally create **Post Templates** under the new admin menu for structured content workflows.
 

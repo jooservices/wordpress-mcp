@@ -14,7 +14,7 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
-    # WP stubs major tracks WordPress major; keep on ^6 while plugin supports 6.4+.
+    # Upgrade the WordPress stubs major alongside the supported WordPress major.
     ignore:
       - dependency-name: "php-stubs/wordpress-stubs"
         update-types: ["version-update:semver-major"]
@@ -38,7 +38,7 @@ updates:
     commit-message:
       prefix: "chore"
       include: "scope"
-    # Majors need dedicated migration PRs (express 5, zod 4, TS 7, Vitest 4, etc.).
+    # Future major updates require a dedicated compatibility migration before adoption.
     ignore:
       - dependency-name: "express"
         update-types: ["version-update:semver-major"]

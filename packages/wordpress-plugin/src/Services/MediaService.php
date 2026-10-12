@@ -780,7 +780,6 @@ final class MediaService
      * suffix ourselves, which could otherwise match an unrelated attachment
      * that merely happens to share the same filename.
      */
-    /** @phpstan-ignore-next-line return.unusedType The wordpress-stubs shape for wp_get_attachment_metadata() omits 'original_image', a real key WP core only adds for scaled attachments — PHPStan can't see the branch below ever matching. */
     private function findAttachmentByScaledVariant(string $relativePath): ?int
     {
         $scaledRelative = $this->deriveScaledRelativePath($relativePath);

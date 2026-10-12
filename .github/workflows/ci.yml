@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [develop]
   pull_request:
     branches: [master, develop]
 
@@ -13,9 +15,15 @@ permissions:
 
 jobs:
   php:
-    name: PHP plugin
+    name: PHP plugin (${{ matrix.php-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.3", "8.4", "8.5"]
+    env:
+      PHP_IMAGE_VERSION: ${{ matrix.php-version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -44,8 +52,8 @@ jobs:
       - name: MCP CI
         working-directory: packages/mcp-server
         run: |
-          docker run --rm -v "$PWD:/app" -w /app node:24-bookworm-slim \
-            sh -c "npm ci && npm run ci"
+          docker run --rm -v "$PWD:/app" -w /app node:24.21.0-bookworm-slim \
+            sh -c "npm install --global npm@12.2.0 && npm ci && npm run ci"
 
   secrets:
     name: Security (Secrets)

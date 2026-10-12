@@ -9,12 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `make e2e-full` plus split Vitest suites under `packages/mcp-server/tests/e2e/` (content/featured, media verify including large JPEG, orphan adopt, resources, site-ops). Nightly / `workflow_dispatch` workflow `.github/workflows/e2e.yml` (not a PR required check).
-- `make plugin-e2e` and `.github/workflows/plugin-e2e.yml`: live WordPress plugin REST suite (PHPUnit `tests/Live`) against Docker WordPress with no MCP server.
+- Three MCP navigation tools for menu details, custom-link item management and ordering, and theme-location assignments. Mutations require `confirm: true`.
+- Five MCP tools for adding existing pages/categories to classic menus, creating or replying to comments, and creating/updating/deleting categories and tags. Mutations require `confirm: true`.
+- E2E regression coverage for menu native items, comments/replies, term CRUD, and auth-before-JSON parsing, including the mixed-mode anonymous 1 MB cap.
+- `make e2e-full` plus split Vitest suites under `packages/mcp-server/tests/e2e/` (content/featured, media verify including large JPEG, orphan adopt, resources, site-ops). The PHP 8.3–8.5 matrix runs on PRs to `develop` / `master`, pushes to `develop`, nightly, and `workflow_dispatch`; `Docker WordPress + MCP` is the stable required aggregate check.
+- `make plugin-e2e` and `.github/workflows/plugin-e2e.yml`: live WordPress plugin REST suite (PHPUnit `tests/Live`) against Docker WordPress with no MCP server. Its PHP 8.3–8.5 matrix runs on PRs to `develop` / `master`, pushes to `develop`, nightly, and `workflow_dispatch`; `WordPress plugin REST` is the stable required aggregate check.
 - E2E fixtures and WP-CLI seed for an on-disk orphan file plus a published `wp-image` broken reference.
 
 ### Fixed
 
+- Menu-item updates preserve omitted parent/order values, normalize order when positions collide, reject updates to non-custom items, and prevent cyclic parent hierarchies. Deletion verifies the item belongs to the requested menu.
+- Navigation-location updates validate the complete map and return the locations WordPress saved.
+- Broken-media scans for a specific post now enforce WordPress `read_post` permissions before returning private or draft content metadata.
 - Content updates no longer deny Gutenberg blocks whose JSON `"id"` is not a media attachment. Embed checks use `wp-image-*`, `wp:image` / `wp:gallery`, gallery `ids`, and `data-id` only.
 - Media verification accepts attachments with empty intermediate `sizes` (tiny images).
 - Orphan adopt confines files with `realpath()` on the uploads basedir (symlink-safe) and normalizes orphan paths. Re-adopting a path already registered (after the orphan cache drops it) returns the existing attachment instead of `pre_validate.not_orphan`.
@@ -23,10 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refresh Node and Composer dependencies, including Express 5, Zod 4, TypeScript 7, Vitest 5, current WordPress stubs, PHPMD 3, and PHPUnit 12 for PHP 8.3 support.
+- Pin PHP 8.5.11, Composer 2.10.3, PCOV 1.0.12, Node 24.21.0, npm 12.2.0, WordPress 7.1.3, WP-CLI 2.12.0, MariaDB 12.3.3, Caddy 2.11.7, and ngrok 3.39.11 images/tools.
+- Make the Git hook installer use portable `sed` behavior on Linux and macOS.
+- Support PHP 8.3–8.5 with CI, live plugin REST tests, and full Docker WordPress/MCP E2E matrices on pushes to `develop`.
 - E2E smoke (`make e2e`) uses compose DNS `http://wordpress` and leaves public-URL verification on (`E2E_SKIP_PUBLIC_URL=0`). `make up` still defaults to `localhost:8080` and skips that verify so the host admin UI works.
 - Docker mu-plugin skips public-URL verify only when `E2E_SKIP_PUBLIC_URL=1`.
-- The next plugin release will require PHP **`^8.5`**; sites running PHP 8.3
-  or 8.4 must upgrade their PHP runtime before updating the plugin.
 
 ## [1.4.6] - 2026-09-05
 
