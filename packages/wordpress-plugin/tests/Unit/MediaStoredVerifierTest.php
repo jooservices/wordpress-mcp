@@ -141,4 +141,50 @@ final class MediaStoredVerifierTest extends TestCase
         self::assertFalse($result['ok']);
         self::assertSame('public_url.decode', $result['step']);
     }
+
+    #[Test]
+    public function it_compares_the_checksum_with_the_original_when_wordpress_scaled_the_image(): void
+    {
+        add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);
+        $scaledPath = $this->pngPath . '-scaled.png';
+        // Any decodable image stands in for the scaled copy; its bytes differ from the original.
+        file_put_contents($scaledPath, $this->pngBytes . "\0");
+        $GLOBALS['wp_test_attachment_files'][501] = $scaledPath;
+        $GLOBALS['wp_test_original_image_paths'][501] = $this->pngPath;
+
+        try {
+            $result = MediaStoredVerifier::verifyAttachment(501, hash('sha256', $this->pngBytes));
+        } finally {
+            unset($GLOBALS['wp_test_original_image_paths'][501]);
+            unlink($scaledPath);
+        }
+
+        self::assertNull($result['step']);
+        self::assertTrue($result['verification']['sha256_match']);
+        self::assertTrue($result['verification']['scaled']);
+    }
+
+    #[Test]
+    public function it_reports_a_failed_public_url_check_as_a_warning_by_default(): void
+    {
+        $GLOBALS['wp_test_remote_get']['https://example.test/wp-content/uploads/test.png'] = 'not-an-image';
+
+        $result = MediaStoredVerifier::verifyAttachment(501, hash('sha256', $this->pngBytes));
+
+        self::assertNull($result['step']);
+        self::assertTrue($result['verification']['passed']);
+        self::assertFalse($result['verification']['public_url_ok']);
+        self::assertSame(['public_url.decode'], $result['verification']['warnings']);
+    }
+
+    #[Test]
+    public function it_fails_on_the_public_url_check_when_the_site_requires_it(): void
+    {
+        $GLOBALS['wp_test_remote_get']['https://example.test/wp-content/uploads/test.png'] = 'not-an-image';
+        add_filter('jooservices_mcp_require_public_url', static fn(): bool => true);
+
+        $result = MediaStoredVerifier::verifyAttachment(501, hash('sha256', $this->pngBytes));
+
+        self::assertSame('public_url.decode', $result['step']);
+    }
 }

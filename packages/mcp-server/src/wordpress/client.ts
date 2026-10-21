@@ -2,13 +2,22 @@ import { normalizeWordPressError, WordPressApiError } from "../errors/normalize.
 import { getRequestId } from "../mcp/requestContext.js";
 import type { WordPressSiteCredentials } from "./types.js";
 
+const DEFAULT_TIMEOUT_MS = 120_000;
+
+function requestTimeoutMs(): number {
+  const parsed = Number(process.env.WORDPRESS_REQUEST_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_TIMEOUT_MS;
+}
+
 export class WordPressClient {
   private readonly baseUrl: string;
   private readonly token: string;
+  private readonly timeoutMs: number;
 
   constructor(credentials: WordPressSiteCredentials) {
     this.baseUrl = `${credentials.url.replace(/\/$/, "")}/wp-json/chatgpt-connector/v1`;
     this.token = credentials.token;
+    this.timeoutMs = requestTimeoutMs();
   }
 
   async get<T>(path: string, query?: Record<string, string | number | undefined>): Promise<T> {
@@ -50,16 +59,32 @@ export class WordPressClient {
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
     const requestId = getRequestId();
 
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: "application/json",
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-        ...(requestId ? { "X-Request-Id": requestId } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/json",
+          ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...(requestId ? { "X-Request-Id": requestId } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        // WordPress may still finish the request after we stop waiting, so
+        // say so instead of reporting a plain failure (JOOWM-5).
+        throw new WordPressApiError(
+          "WORDPRESS_TIMEOUT",
+          `WordPress did not answer within ${Math.round(this.timeoutMs / 1000)}s. The change may still have been applied; check the site before retrying (media uploads with the same bytes are deduplicated).`,
+          504,
+        );
+      }
+
+      throw error;
+    }
 
     const text = await response.text();
     let parsed: unknown = {};

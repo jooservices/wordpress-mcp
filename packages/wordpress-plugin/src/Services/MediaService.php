@@ -22,6 +22,12 @@ final class MediaService
      */
     private const SOURCE_PATH_META_KEY = '_jooservices_orphan_source_path';
 
+    private const SOURCE_SHA256_META_KEY = '_mcp_source_sha256';
+
+    private const UPLOADED_AT_META_KEY = '_mcp_uploaded_at';
+
+    private const DEDUPE_WINDOW_SECONDS = 3600;
+
     /** @var list<string> */
     private const BLOCKED_EXTENSIONS = [
         'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
@@ -139,58 +145,77 @@ final class MediaService
             return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.extension');
         }
 
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/media.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
-
-        $attachmentId = $this->sideloadAttachment($fileName, $preCheck['mime'], $content);
+        $attachmentId = $this->findRecentUpload($preCheck['sha256']);
+        $reused = $attachmentId !== null;
 
         if ($attachmentId === null) {
-            return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.sideload');
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+
+            $attachmentId = $this->sideloadAttachment($fileName, $preCheck['mime'], $content);
+
+            if ($attachmentId === null) {
+                return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.sideload');
+            }
+
+            // media_handle_sideload() already generated the metadata and
+            // subsizes. Generating them a second time doubled the request
+            // time and, for big images, rebuilt the metadata from the
+            // `-scaled` file, dropping WordPress's `original_image` record.
+            if (! is_array(wp_get_attachment_metadata($attachmentId))) {
+                $metadata = wp_generate_attachment_metadata($attachmentId, (string) get_attached_file($attachmentId));
+                wp_update_attachment_metadata($attachmentId, $metadata);
+            }
+
+            $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
+
+            if ($stored['step'] !== null) {
+                $this->cleanupAttachment($attachmentId);
+
+                return $this->uploadFailure(
+                    ErrorCodes::MEDIA_VERIFY_FAILED,
+                    $stored['step'],
+                    $stored['verification'],
+                );
+            }
+
+            update_post_meta($attachmentId, self::SOURCE_SHA256_META_KEY, $preCheck['sha256']);
+            update_post_meta($attachmentId, self::UPLOADED_AT_META_KEY, (string) time());
+        } else {
+            $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
+
+            if ($stored['step'] !== null) {
+                return $this->uploadFailure(
+                    ErrorCodes::MEDIA_VERIFY_FAILED,
+                    $stored['step'],
+                    $stored['verification'],
+                );
+            }
         }
 
-        $metadata = wp_generate_attachment_metadata($attachmentId, (string) get_attached_file($attachmentId));
-        wp_update_attachment_metadata($attachmentId, $metadata);
-
-        $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
-
-        if ($stored['step'] !== null) {
-            $this->cleanupAttachment($attachmentId);
-
-            return $this->uploadFailure(
-                ErrorCodes::MEDIA_VERIFY_FAILED,
-                $stored['step'],
-                $stored['verification'],
-            );
-        }
-
+        // From here on the file is stored and verified. Later steps can only
+        // add warnings: deleting a good attachment because a title was
+        // rewritten by WordPress or the featured image could not be set is
+        // what made images vanish mid-workflow (JOOWM-5).
+        $verification = $stored['verification'];
         $metadataFields = $this->applyMetadata($attachmentId, $data, $naming);
         $metadataCheck = MediaStoredVerifier::verifyMetadata($attachmentId, $metadataFields);
 
         if ($metadataCheck['step'] !== null) {
-            $this->cleanupAttachment($attachmentId);
-
-            return $this->uploadFailure(
-                ErrorCodes::MEDIA_VERIFY_FAILED,
-                $metadataCheck['step'],
-                array_merge($stored['verification'], ['failed_step' => $metadataCheck['step']]),
-            );
+            $verification['metadata_mismatch'] = $metadataCheck['verification']['metadata_mismatch'] ?? null;
+            $verification['warnings'][] = $metadataCheck['step'];
         }
 
-        $verification = $stored['verification'];
         $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
 
         if ($featuredSet['error'] !== null) {
-            $this->cleanupAttachment($attachmentId);
-
-            return $this->uploadFailure(
-                $featuredSet['error'],
-                $featuredSet['step'] ?? 'featured.set_failed',
-                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
-            );
+            $verification['featured_error'] = $featuredSet['error'];
+            $verification['warnings'][] = $featuredSet['step'] ?? 'featured.set_failed';
         }
 
         $verification['featured_set'] = $featuredSet['set'];
+        $verification['reused'] = $reused;
         $verification['passed'] = true;
         MediaStoredVerifier::markVerified($attachmentId);
 
@@ -205,6 +230,44 @@ final class MediaService
             'error' => null,
             'error_step' => null,
         ];
+    }
+
+    /**
+     * Retry protection: an AI client that timed out waiting for an upload
+     * usually sends the same bytes again. Returns the attachment created
+     * from those bytes in the last hour instead of storing a duplicate.
+     */
+    private function findRecentUpload(string $sha256): ?int
+    {
+        if ($sha256 === '') {
+            return null;
+        }
+
+        $query = new WP_Query([
+            'post_type' => 'attachment',
+            'post_status' => 'inherit',
+            'posts_per_page' => 5,
+            'orderby' => 'ID',
+            'order' => 'DESC',
+            'no_found_rows' => true,
+            'meta_query' => [
+                ['key' => self::SOURCE_SHA256_META_KEY, 'value' => $sha256],
+            ],
+        ]);
+
+        foreach ($query->posts as $post) {
+            if (! $post instanceof \WP_Post) {
+                continue;
+            }
+
+            $uploadedAt = (int) get_post_meta((int) $post->ID, self::UPLOADED_AT_META_KEY, true);
+
+            if ($uploadedAt >= time() - self::DEDUPE_WINDOW_SECONDS && is_file((string) get_attached_file((int) $post->ID))) {
+                return (int) $post->ID;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -402,15 +465,8 @@ final class MediaService
         $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
 
         if ($featuredSet['error'] !== null) {
-            if ($isNewAdoption) {
-                $this->detachFailedAdoption($attachmentId);
-            }
-
-            return $this->uploadFailure(
-                $featuredSet['error'],
-                $featuredSet['step'] ?? 'featured.set_failed',
-                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
-            );
+            $verification['featured_error'] = $featuredSet['error'];
+            $verification['warnings'][] = $featuredSet['step'] ?? 'featured.set_failed';
         }
 
         $verification['featured_set'] = $featuredSet['set'];

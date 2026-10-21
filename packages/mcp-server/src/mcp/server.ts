@@ -1437,7 +1437,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       name: "wordpress_upload_media",
       title: "Upload WordPress media",
       description:
-        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256), verifies stored file, metadata, subsizes, and public URL before returning. Use attachment ID only when verification.passed is true. Call wordpress_get_site for upload limits. Optionally set featured image with post_id + set_featured after verification passes.",
+        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256 of the original even when WordPress scales big images), verifies the stored file and subsizes, and reports a failed public-URL check as a warning. Use the attachment ID when verification.passed is true. Re-sending the same bytes within an hour returns the same attachment (verification.reused) instead of a duplicate, so retrying after a timeout is safe. Call wordpress_get_site for upload limits. Optionally set the featured image with post_id + set_featured; if that step fails the media is kept and verification.featured_set is false.",
       inputSchema: uploadMediaSchema,
       access: "write",
       dto: { kind: "media" },
@@ -1446,12 +1446,16 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const item = await client.post<MediaDto>("/media", wpArgs(args));
       const verification = item.verification;
       const passed = verification?.passed === true;
+      const reused = verification?.reused === true ? " (same bytes uploaded recently, existing attachment reused)" : "";
+      const featuredFailed = args.set_featured === true && verification?.featured_set !== true
+        ? ` The file is stored, but the featured image was NOT set (${verification?.warnings?.find((w) => w.startsWith("featured.")) ?? "featured.set_failed"}); set it with wordpress_update_content featured_media: ${item.id}.`
+        : "";
       return {
         content: [
           {
             type: "text",
             text: passed
-              ? `Uploaded verified media #${item.id} on site "${siteId}".`
+              ? `Uploaded verified media #${item.id} on site "${siteId}"${reused}.${featuredFailed}`
               : `Uploaded media #${item.id} on site "${siteId}", but verification did not pass.`,
           },
         ],

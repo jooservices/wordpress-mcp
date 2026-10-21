@@ -90,7 +90,12 @@ export type MediaVerificationDto = {
   public_url_ok?: boolean | null;
   public_url_status?: number | null;
   featured_set?: boolean;
+  featured_error?: string | null;
   failed_step?: string | null;
+  scaled?: boolean;
+  reused?: boolean;
+  warnings?: string[];
+  metadata_mismatch?: { field: string; expected: string | null; actual: string } | null;
 };
 
 export type MediaDto = {
@@ -305,7 +310,12 @@ const MEDIA_VERIFICATION_FIELDS = new Set([
   "public_url_ok",
   "public_url_status",
   "featured_set",
+  "featured_error",
   "failed_step",
+  "scaled",
+  "reused",
+  "warnings",
+  "metadata_mismatch",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {

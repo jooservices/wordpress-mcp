@@ -16,24 +16,34 @@ final class MediaStoredVerifier
         $filePath = (string) get_attached_file($attachmentId);
         $inspection = MediaImageInspector::inspectFile($filePath);
 
+        // WordPress replaces images above `big_image_size_threshold` (2560px)
+        // with a `-scaled` copy and keeps the uploaded bytes as the original
+        // image. Checksums must be compared against that original, or every
+        // large photo fails verification (JOOWM-4).
+        $originalPath = self::originalFilePath($attachmentId, $filePath);
+        $original = $originalPath === $filePath ? $inspection : MediaImageInspector::inspectFile($originalPath);
+
         $verification = MediaVerificationResult::build([
-            'source_bytes' => $inspection['bytes'],
-            'stored_bytes' => is_file($filePath) ? filesize($filePath) : null,
-            'sha256' => $sourceSha256 ?? $inspection['sha256'],
-            'stored_sha256' => $inspection['sha256'],
-            'sha256_match' => $sourceSha256 === null ? null : hash_equals($sourceSha256, $inspection['sha256']),
+            'source_bytes' => $original['bytes'],
+            'stored_bytes' => is_file($originalPath) ? filesize($originalPath) : null,
+            'sha256' => $sourceSha256 ?? $original['sha256'],
+            'stored_sha256' => $original['sha256'],
+            'sha256_match' => $sourceSha256 === null ? null : hash_equals($sourceSha256, $original['sha256']),
             'mime_detected' => $inspection['mime'],
             'mime_stored' => get_post_mime_type($attachmentId) ?: null,
             'width' => $inspection['width'],
             'height' => $inspection['height'],
             'decode_ok' => $inspection['ok'],
             'metadata_generated' => self::hasGeneratedMetadata($attachmentId),
+            'scaled' => $originalPath !== $filePath,
         ]);
 
-        if (! $inspection['ok']) {
-            $verification['failed_step'] = $inspection['step'];
+        foreach ([$inspection, $original] as $checked) {
+            if (! $checked['ok']) {
+                $verification['failed_step'] = $checked['step'];
 
-            return ['verification' => $verification, 'step' => $inspection['step']];
+                return ['verification' => $verification, 'step' => $checked['step']];
+            }
         }
 
         if ($sourceSha256 !== null && $verification['sha256_match'] !== true) {
@@ -42,7 +52,7 @@ final class MediaStoredVerifier
             return ['verification' => $verification, 'step' => 'post_validate.sha256_mismatch'];
         }
 
-        if (is_int($verification['stored_bytes']) && $verification['stored_bytes'] !== $inspection['bytes']) {
+        if (is_int($verification['stored_bytes']) && $verification['stored_bytes'] !== $original['bytes']) {
             $verification['failed_step'] = 'post_validate.filesize_mismatch';
 
             return ['verification' => $verification, 'step' => 'post_validate.filesize_mismatch'];
@@ -68,9 +78,18 @@ final class MediaStoredVerifier
         $verification['public_url_status'] = $publicCheck['status'];
 
         if (! $publicCheck['ok']) {
-            $verification['failed_step'] = $publicCheck['step'];
+            // The loopback fetch fails on many hosts (WAF, CDN, blocked
+            // loopback, self-signed TLS) although visitors see the file
+            // fine. It only fails verification when a site opts in; by
+            // default it is reported as a warning so a stored, decodable
+            // file is never discarded over it (JOOWM-5).
+            if ((bool) apply_filters('jooservices_mcp_require_public_url', false)) {
+                $verification['failed_step'] = $publicCheck['step'];
 
-            return ['verification' => $verification, 'step' => $publicCheck['step']];
+                return ['verification' => $verification, 'step' => $publicCheck['step']];
+            }
+
+            $verification['warnings'][] = (string) $publicCheck['step'];
         }
 
         $verification['passed'] = true;
@@ -86,7 +105,7 @@ final class MediaStoredVerifier
     public static function verifyMetadata(int $attachmentId, array $expected): array
     {
         $checks = [
-            'metadata.title' => [get_the_title($attachmentId), $expected['title'] ?? null],
+            'metadata.title' => [(string) get_post_field('post_title', $attachmentId, 'raw'), $expected['title'] ?? null],
             'metadata.alt_text' => [(string) get_post_meta($attachmentId, '_wp_attachment_image_alt', true), $expected['alt_text'] ?? null],
             'metadata.caption' => [(string) get_post_field('post_excerpt', $attachmentId), $expected['caption'] ?? null],
             'metadata.description' => [(string) get_post_field('post_content', $attachmentId), $expected['description'] ?? null],
@@ -162,6 +181,17 @@ final class MediaStoredVerifier
         }
 
         return ['ok' => true, 'status' => $status, 'step' => null];
+    }
+
+    private static function originalFilePath(int $attachmentId, string $attachedPath): string
+    {
+        if (! function_exists('wp_get_original_image_path')) {
+            return $attachedPath;
+        }
+
+        $original = wp_get_original_image_path($attachmentId);
+
+        return is_string($original) && $original !== '' && is_file($original) ? $original : $attachedPath;
     }
 
     private static function hasGeneratedMetadata(int $attachmentId): bool
