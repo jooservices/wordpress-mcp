@@ -38,6 +38,7 @@ cleanup() {
   trap - EXIT
   if (( status != 0 )); then
     compose logs --tail=120 wordpress mcp wp-init >&2 || true
+    compose --profile oauth logs --tail=80 mcp-oauth >&2 || true
   fi
   if ! compose down --volumes --remove-orphans; then
     if (( status == 0 )); then
@@ -83,6 +84,9 @@ compose run --rm wp-init
 compose up -d --build --force-recreate mcp
 
 if [ "$FULL" = "1" ]; then
+  echo "==> Starting Mixed/OAuth MCP server for the OAuth E2E"
+  compose --profile oauth up -d --build mcp-oauth
+
   echo "==> Seeding orphan file + broken wp-image post"
   compose run --rm --entrypoint /bin/sh wp-init /init/seed-e2e-media.sh
 fi
@@ -124,7 +128,6 @@ compose --profile e2e run --rm \
   -e RUN_E2E_FULL="${RUN_E2E_FULL:-}" \
   -e RUN_E2E_OAUTH="$OAUTH_ENABLED" \
   -e MCP_AUTH_MODE="$OAUTH_MODE" \
-  -e MCP_PUBLIC_URL=http://mcp:3000 \
   e2e
 
 if [ "$FULL" = "1" ]; then
