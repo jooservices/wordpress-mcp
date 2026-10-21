@@ -146,6 +146,20 @@ final class MediaService
         }
 
         $attachmentId = $this->findRecentUpload($preCheck['sha256']);
+        $stored = null;
+
+        if ($attachmentId !== null) {
+            $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
+
+            if ($stored['step'] !== null) {
+                // The earlier copy no longer verifies (file changed or
+                // damaged): stop offering it for reuse and store a fresh one.
+                delete_post_meta($attachmentId, self::SOURCE_SHA256_META_KEY);
+                $attachmentId = null;
+                $stored = null;
+            }
+        }
+
         $reused = $attachmentId !== null;
 
         if ($attachmentId === null) {
@@ -182,16 +196,6 @@ final class MediaService
 
             update_post_meta($attachmentId, self::SOURCE_SHA256_META_KEY, $preCheck['sha256']);
             update_post_meta($attachmentId, self::UPLOADED_AT_META_KEY, (string) time());
-        } else {
-            $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
-
-            if ($stored['step'] !== null) {
-                return $this->uploadFailure(
-                    ErrorCodes::MEDIA_VERIFY_FAILED,
-                    $stored['step'],
-                    $stored['verification'],
-                );
-            }
         }
 
         // From here on the file is stored and verified. Later steps can only
