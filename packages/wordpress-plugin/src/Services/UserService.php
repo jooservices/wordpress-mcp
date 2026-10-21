@@ -58,6 +58,10 @@ final class UserService
             return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
 
+        if (! $this->canAssignRole($role)) {
+            return ['user' => null, 'error' => ErrorCodes::PERMISSION_DENIED];
+        }
+
         $userId = wp_insert_user([
             'user_login' => $login,
             'user_email' => $email,
@@ -81,6 +85,23 @@ final class UserService
     {
         if (! get_userdata($id) instanceof WP_User) {
             return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
+        }
+
+        $role = null;
+
+        if (isset($data['role'])) {
+            $role = sanitize_key((string) $data['role']);
+
+            if (! isset(wp_roles()->roles[$role])) {
+                return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
+            }
+
+            // Same rule as wp-admin: nobody changes their own role, and a
+            // role can only be granted by someone who holds all of its
+            // capabilities (JOOWM-6).
+            if ($id === get_current_user_id() || ! $this->canAssignRole($role)) {
+                return ['user' => null, 'error' => ErrorCodes::PERMISSION_DENIED];
+            }
         }
 
         $update = ['ID' => $id];
@@ -107,13 +128,7 @@ final class UserService
             return ['user' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
         }
 
-        if (isset($data['role'])) {
-            $role = sanitize_key((string) $data['role']);
-
-            if (! isset(wp_roles()->roles[$role])) {
-                return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
-            }
-
+        if ($role !== null) {
             $user = new WP_User($id);
             $user->set_role($role);
         }
@@ -163,5 +178,28 @@ final class UserService
             'roles' => array_values($user->roles),
             'registered_at' => $user->user_registered,
         ];
+    }
+
+    private function canAssignRole(string $role): bool
+    {
+        if (! function_exists('get_editable_roles')) {
+            /** @phpstan-ignore-next-line WP's runtime install provides this admin-only file. */
+            require_once ABSPATH . 'wp-admin/includes/user.php';
+        }
+
+        if (! array_key_exists($role, get_editable_roles())) {
+            return false;
+        }
+
+        $actor = get_current_user_id();
+        $capabilities = wp_roles()->roles[$role]['capabilities'] ?? [];
+
+        foreach ($capabilities as $capability => $granted) {
+            if ($granted && ! user_can($actor, (string) $capability)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
