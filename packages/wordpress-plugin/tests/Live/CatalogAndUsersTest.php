@@ -84,4 +84,42 @@ final class CatalogAndUsersTest extends LiveTestCase
         self::assertSame(200, $deleted['status']);
         $this->userIds = array_values(array_filter($this->userIds, static fn(int $kept): bool => $kept !== $id));
     }
+
+    #[Test]
+    public function it_refuses_to_change_the_connection_users_own_role(): void
+    {
+        $self = $this->api('PATCH', '/users/1', ['role' => 'subscriber']);
+        self::assertSame(403, $self['status'], (string) json_encode($self['body']));
+
+        $still = $this->api('GET', '/users?per_page=50');
+        $admin = array_values(array_filter(
+            $still['body']['items'] ?? [],
+            static fn(array $user): bool => (int) $user['id'] === 1,
+        ));
+        self::assertContains('administrator', $admin[0]['roles'] ?? []);
+    }
+
+    #[Test]
+    public function it_applies_no_setting_when_one_value_is_invalid_and_accepts_unchanged_values(): void
+    {
+        $before = $this->api('GET', '/settings');
+        self::assertSame(200, $before['status']);
+        $description = (string) $before['body']['blogdescription'];
+
+        $rejected = $this->api('PATCH', '/settings', [
+            'blogdescription' => 'Should not be saved ' . $this->faker->numerify('####'),
+            'default_comment_status' => 'sometimes',
+        ]);
+        self::assertSame(400, $rejected['status']);
+
+        $after = $this->api('GET', '/settings');
+        self::assertSame($description, $after['body']['blogdescription']);
+
+        $unchanged = $this->api('PATCH', '/settings', [
+            'blogdescription' => $description,
+            'blog_public' => (bool) $before['body']['blog_public'],
+            'posts_per_page' => (int) $before['body']['posts_per_page'],
+        ]);
+        self::assertSame(200, $unchanged['status'], (string) json_encode($unchanged['body']));
+    }
 }

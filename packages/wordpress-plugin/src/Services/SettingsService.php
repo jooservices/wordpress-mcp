@@ -47,6 +47,10 @@ final class SettingsService
      */
     public function update(array $data): array
     {
+        // Validate every field before writing any, so a bad value in the
+        // middle of a request no longer leaves half the settings applied.
+        $sanitizedValues = [];
+
         foreach ($data as $option => $value) {
             if (! array_key_exists($option, self::OPTIONS)) {
                 return ['settings' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
@@ -65,8 +69,20 @@ final class SettingsService
                 return ['settings' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
             }
 
-            if (get_option($option) !== $sanitized && ! update_option($option, $sanitized)) {
-                return ['settings' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
+            $sanitizedValues[$option] = $sanitized;
+        }
+
+        foreach ($sanitizedValues as $option => $sanitized) {
+            $stored = $sanitized === true ? '1' : ($sanitized === false ? '0' : $sanitized);
+
+            // update_option() returns false for an unchanged value as well,
+            // so only a value that is still different afterwards is a failure.
+            if ((string) get_option($option) !== (string) $stored) {
+                update_option($option, $stored);
+
+                if ((string) get_option($option) !== (string) $stored) {
+                    return ['settings' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
+                }
             }
         }
 

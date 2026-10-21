@@ -66,9 +66,11 @@ final class RequestContext
         $route = $request->get_route();
 
         if ($connection === null) {
-            (new AuditLogger())->log(null, self::requestId(), 'denied', 'auth', $route, false, [
-                'reason' => 'authentication_failed',
-            ]);
+            if (self::shouldLogAnonymousFailure()) {
+                (new AuditLogger())->log(null, self::requestId(), 'denied', 'auth', $route, false, [
+                    'reason' => 'authentication_failed',
+                ]);
+            }
 
             $err = ErrorCodes::error(
                 ErrorCodes::AUTHENTICATION_FAILED,
@@ -96,6 +98,24 @@ final class RequestContext
         }
 
         return $connection;
+    }
+
+    /**
+     * Unauthenticated callers could otherwise add one audit row per request.
+     * Logs the first failure per client address each minute (JOOWM-6).
+     */
+    private static function shouldLogAnonymousFailure(): bool
+    {
+        $address = isset($_SERVER['REMOTE_ADDR']) ? sanitize_text_field((string) $_SERVER['REMOTE_ADDR']) : 'unknown';
+        $key = 'chatgpt_authfail_' . md5($address);
+
+        if (get_transient($key) !== false) {
+            return false;
+        }
+
+        set_transient($key, 1, 60);
+
+        return true;
     }
 
     public static function deny(string $message = 'Permission denied.'): WP_Error
