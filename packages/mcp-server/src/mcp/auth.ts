@@ -11,4 +11,5 @@ export type McpServerOptions = {
   observability: McpObservabilityHandler;
   protocolVersionPolicy: ProtocolVersionPolicy;
   activeSiteStore: ActiveSiteStore;
+  allowAnonymousRead?: boolean;
 };

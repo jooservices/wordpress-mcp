@@ -49,6 +49,7 @@ async function startServer(authMode: "static" | "mixed"): Promise<RunningServer>
       MCP_PORT: String(port),
       MCP_JSON_BODY_LIMIT: "2mb",
       MCP_OAUTH_RATE_LIMIT_ENABLED: "0",
+      MCP_OAUTH_APPROVAL_SECRET: "body-test-approval-secret",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -113,6 +114,55 @@ describe("MCP body parsing and authentication order", () => {
       body: "{",
     });
     expect(authenticated.status).toBe(400);
+  });
+
+  it("serves requests for an unknown or expired session instead of returning 404", async () => {
+    const server = await startServer("static");
+
+    const response = await fetch(server.baseUrl + "/mcp", {
+      method: "POST",
+      headers: {
+        authorization: "Bearer body-test-static-secret",
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        "mcp-session-id": "00000000-0000-4000-8000-000000000000",
+        "mcp-protocol-version": "2025-06-18",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 7, method: "tools/list", params: {} }),
+    });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { id: number; result?: { tools: Array<{ name: string }> } };
+    expect(body.id).toBe(7);
+    expect(body.result?.tools.some((tool) => tool.name === "wordpress_list_sites")).toBe(true);
+  });
+
+  it("challenges anonymous read tools in mixed mode", async () => {
+    const server = await startServer("mixed");
+    const headers = {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+    };
+    const init = await fetch(server.baseUrl + "/mcp", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "anon", version: "0" } },
+      }),
+    });
+    const sessionId = init.headers.get("mcp-session-id") ?? "";
+
+    const call = await fetch(server.baseUrl + "/mcp", {
+      method: "POST",
+      headers: { ...headers, "mcp-session-id": sessionId, "mcp-protocol-version": "2025-06-18" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "wordpress_list_users", arguments: {} } }),
+    });
+    const body = (await call.json()) as { result?: { isError?: boolean; _meta?: Record<string, unknown> } };
+    expect(body.result?.isError).toBe(true);
+    expect(body.result?._meta?.["mcp/www_authenticate"]).toBeDefined();
   });
 
   it("limits anonymous mixed requests and keeps authenticated and OAuth routes working", async () => {
@@ -183,8 +233,27 @@ describe("MCP body parsing and authentication order", () => {
       resource,
     });
     const authorization = await fetch(server.baseUrl + "/authorize?" + authorizeParams, { redirect: "manual" });
-    expect(authorization.status).toBe(302);
-    const code = new URL(authorization.headers.get("location") ?? "").searchParams.get("code");
+    expect(authorization.status).toBe(200);
+    const requestId = /name="request_id" value="([^"]+)"/.exec(await authorization.text())?.[1] ?? "";
+
+    const wrongSecret = await fetch(server.baseUrl + "/oauth/approve", {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ request_id: requestId, secret: "not-the-secret", decision: "approve" }),
+    });
+    expect(wrongSecret.status).toBe(403);
+
+    const retry = await fetch(server.baseUrl + "/authorize?" + authorizeParams, { redirect: "manual" });
+    const retryId = /name="request_id" value="([^"]+)"/.exec(await retry.text())?.[1] ?? "";
+    const approval = await fetch(server.baseUrl + "/oauth/approve", {
+      method: "POST",
+      redirect: "manual",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ request_id: retryId, secret: "body-test-approval-secret", decision: "approve" }),
+    });
+    expect(approval.status).toBe(302);
+    const code = new URL(approval.headers.get("location") ?? "").searchParams.get("code");
     expect(code).toBeTruthy();
 
     const tokenResponse = await fetch(server.baseUrl + "/token", {

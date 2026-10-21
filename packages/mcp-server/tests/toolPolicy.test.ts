@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { runWithAuth } from "../src/auth/context.js";
+import { OAUTH_SCOPES } from "../src/auth/types.js";
 import { assertToolPermission, getToolAccess, registerToolAccess } from "../src/mcp/toolPolicy.js";
 import type { ToolPolicyOptions } from "../src/mcp/toolPolicy.js";
 
@@ -49,17 +51,31 @@ describe("assertToolPermission", () => {
       assertToolPermission(
         "wordpress_get_content",
         "read",
-        options({ enabledTools: new Set(["wordpress_get_content"]) }),
+        options({ authMode: "static", enabledTools: new Set(["wordpress_get_content"]) }),
       ),
     ).toBeNull();
   });
 
   it("ignores the allowlist when it is undefined", () => {
-    expect(assertToolPermission("wordpress_get_content", "read", options({ enabledTools: undefined }))).toBeNull();
+    expect(assertToolPermission("wordpress_get_content", "read", options({ authMode: "static", enabledTools: undefined }))).toBeNull();
   });
 
-  it("allows read tools without scopes (mixed/oauth read)", () => {
-    expect(assertToolPermission("wordpress_search_content", "read", options())).toBeNull();
+  it("challenges anonymous read tools under oauth and mixed by default", () => {
+    expect(assertToolPermission("wordpress_list_users", "read", options())?.isError).toBe(true);
+    expect(assertToolPermission("wordpress_list_users", "read", options({ authMode: "mixed" }))?.isError).toBe(true);
+  });
+
+  it("allows anonymous read tools in mixed mode only when explicitly enabled", () => {
+    expect(assertToolPermission("wordpress_search_content", "read", options({ authMode: "mixed", allowAnonymousRead: true }))).toBeNull();
+    expect(assertToolPermission("wordpress_search_content", "read", options({ authMode: "oauth", allowAnonymousRead: true }))?.isError).toBe(true);
+  });
+
+  it("allows read tools with a read or write scope", () => {
+    const read = { token: "t", clientId: "c", scopes: [OAUTH_SCOPES.READ] };
+    const write = { token: "t", clientId: "c", scopes: [OAUTH_SCOPES.WRITE] };
+    expect(runWithAuth(read, () => assertToolPermission("wordpress_list_users", "read", options({ authMode: "mixed" })))).toBeNull();
+    expect(runWithAuth(write, () => assertToolPermission("wordpress_list_users", "read", options()))).toBeNull();
+    expect(runWithAuth(read, () => assertToolPermission("wordpress_create_content", "write", options()))?.isError).toBe(true);
   });
 
   it("skips the scope check for write tools in static/none modes", () => {

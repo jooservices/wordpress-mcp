@@ -14,6 +14,10 @@ export const mixedReadSchemes: SecurityScheme[] = [
   { type: "oauth2", scopes: [OAUTH_SCOPES.READ] },
 ];
 
+export const oauthReadSchemes: SecurityScheme[] = [
+  { type: "oauth2", scopes: [OAUTH_SCOPES.READ] },
+];
+
 export const oauthWriteSchemes: SecurityScheme[] = [
   { type: "oauth2", scopes: [OAUTH_SCOPES.WRITE] },
 ];

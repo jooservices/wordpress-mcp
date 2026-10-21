@@ -6,6 +6,9 @@ import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/share
 
 const STATE_FILE = "oauth-state.json";
 const AUTH_CODE_TTL_MS = 10 * 60 * 1000;
+const PENDING_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
+/** Registered clients that never obtained a token are dropped after this. */
+const UNUSED_CLIENT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type StoredAuthCode = {
   client: OAuthClientInformationFull;
@@ -27,6 +30,9 @@ export type StoredRefreshToken = {
   scopes: string[];
   expiresAt: number;
   resource?: string;
+  /** Set once the token was exchanged; it stays valid for a short grace window. */
+  rotatedAt?: number;
+  successor?: { accessToken: string; refreshToken: string };
 };
 
 type SerializedClient = {
@@ -60,6 +66,7 @@ type SerializedAuthCode = {
 type OAuthStateFile = {
   clients: Record<string, SerializedClient>;
   codes: Record<string, SerializedAuthCode>;
+  pending: Record<string, SerializedAuthCode>;
   accessTokens: Record<string, StoredAccessToken>;
   refreshTokens: Record<string, StoredRefreshToken>;
 };
@@ -139,6 +146,7 @@ function emptyStateFile(): OAuthStateFile {
   return {
     clients: {},
     codes: {},
+    pending: {},
     accessTokens: {},
     refreshTokens: {},
   };
@@ -208,6 +216,33 @@ export class FileOAuthStore implements OAuthRegisteredClientsStore {
     }
 
     return parsed;
+  }
+
+  /** Authorization request waiting for the site owner's decision on the consent page. */
+  async savePendingAuthorization(id: string, data: StoredAuthCode): Promise<void> {
+    await this.syncFromDisk();
+    this.state.pending[id] = serializeAuthCode(data);
+    await this.persist();
+  }
+
+  async consumePendingAuthorization(id: string): Promise<StoredAuthCode | undefined> {
+    await this.syncFromDisk();
+    const stored = this.state.pending[id];
+    if (!stored) {
+      return undefined;
+    }
+
+    delete this.state.pending[id];
+    await this.persist();
+
+    const parsed = deserializeAuthCode(stored);
+    return parsed.createdAt + PENDING_AUTHORIZATION_TTL_MS < Date.now() ? undefined : parsed;
+  }
+
+  async getPendingAuthorization(id: string): Promise<StoredAuthCode | undefined> {
+    await this.syncFromDisk();
+    const stored = this.state.pending[id];
+    return stored ? deserializeAuthCode(stored) : undefined;
   }
 
   async saveAccessToken(token: StoredAccessToken): Promise<void> {
@@ -289,6 +324,12 @@ export class FileOAuthStore implements OAuthRegisteredClientsStore {
       }
     }
 
+    for (const [id, stored] of Object.entries(this.state.pending)) {
+      if (stored.createdAt + PENDING_AUTHORIZATION_TTL_MS < now) {
+        delete this.state.pending[id];
+      }
+    }
+
     for (const [token, stored] of Object.entries(this.state.accessTokens)) {
       if (stored.expiresAt < now) {
         delete this.state.accessTokens[token];
@@ -298,6 +339,23 @@ export class FileOAuthStore implements OAuthRegisteredClientsStore {
     for (const [token, stored] of Object.entries(this.state.refreshTokens)) {
       if (stored.expiresAt < now) {
         delete this.state.refreshTokens[token];
+      }
+    }
+
+    // Open dynamic registration lets anyone add clients; drop the ones that
+    // never completed an authorization so the state file cannot grow forever.
+    const clientsInUse = new Set<string>([
+      ...Object.values(this.state.accessTokens).map((t) => t.clientId),
+      ...Object.values(this.state.refreshTokens).map((t) => t.clientId),
+      ...Object.values(this.state.codes).map((c) => c.client.client_id),
+      ...Object.values(this.state.pending).map((c) => c.client.client_id),
+    ]);
+    for (const [clientId, client] of Object.entries(this.state.clients)) {
+      if (client.client_id_issued_at === undefined || clientsInUse.has(clientId)) {
+        continue;
+      }
+      if (client.client_id_issued_at * 1000 + UNUSED_CLIENT_TTL_MS < now) {
+        delete this.state.clients[clientId];
       }
     }
   }
@@ -319,6 +377,7 @@ export class FileOAuthStore implements OAuthRegisteredClientsStore {
     return {
       clients: parsed.clients ?? {},
       codes: parsed.codes ?? {},
+      pending: parsed.pending ?? {},
       accessTokens: parsed.accessTokens ?? {},
       refreshTokens: parsed.refreshTokens ?? {},
     };
