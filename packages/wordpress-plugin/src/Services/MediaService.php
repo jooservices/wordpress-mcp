@@ -234,8 +234,9 @@ final class MediaService
 
     /**
      * Retry protection: an AI client that timed out waiting for an upload
-     * usually sends the same bytes again. Returns the attachment created
-     * from those bytes in the last hour instead of storing a duplicate.
+     * usually sends the same bytes again. Returns the attachment the same
+     * user created from those bytes in the last hour instead of storing a
+     * duplicate; another user's upload is never reused.
      */
     private function findRecentUpload(string $sha256): ?int
     {
@@ -243,9 +244,16 @@ final class MediaService
             return null;
         }
 
+        $userId = get_current_user_id();
+
+        if ($userId <= 0) {
+            return null;
+        }
+
         $query = new WP_Query([
             'post_type' => 'attachment',
             'post_status' => 'inherit',
+            'author' => $userId,
             'posts_per_page' => 5,
             'orderby' => 'ID',
             'order' => 'DESC',
@@ -262,7 +270,12 @@ final class MediaService
 
             $uploadedAt = (int) get_post_meta((int) $post->ID, self::UPLOADED_AT_META_KEY, true);
 
-            if ($uploadedAt >= time() - self::DEDUPE_WINDOW_SECONDS && is_file((string) get_attached_file((int) $post->ID))) {
+            if (
+                (int) $post->post_author === $userId
+                && $uploadedAt >= time() - self::DEDUPE_WINDOW_SECONDS
+                && user_can($userId, 'edit_post', (int) $post->ID)
+                && is_file((string) get_attached_file((int) $post->ID))
+            ) {
                 return (int) $post->ID;
             }
         }

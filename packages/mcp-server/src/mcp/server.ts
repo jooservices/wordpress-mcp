@@ -1447,8 +1447,11 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const verification = item.verification;
       const passed = verification?.passed === true;
       const reused = verification?.reused === true ? " (same bytes uploaded recently, existing attachment reused)" : "";
+      const featuredRecovery = verification?.featured_error === "POST_NOT_FOUND"
+        ? ""
+        : `; set it with wordpress_update_content featured_media: ${item.id}`;
       const featuredFailed = args.set_featured === true && verification?.featured_set !== true
-        ? ` The file is stored, but the featured image was NOT set (${verification?.warnings?.find((w) => w.startsWith("featured.")) ?? "featured.set_failed"}); set it with wordpress_update_content featured_media: ${item.id}.`
+        ? ` The file is stored, but the featured image was NOT set (${verification?.warnings?.find((w) => w.startsWith("featured.")) ?? "featured.set_failed"})${featuredRecovery}.`
         : "";
       return {
         content: [

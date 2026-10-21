@@ -60,6 +60,7 @@ export class WordPressClient {
     const requestId = getRequestId();
 
     let response: Response;
+    let text: string;
     try {
       response = await fetch(url, {
         method,
@@ -72,6 +73,8 @@ export class WordPressClient {
         body: body !== undefined ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(this.timeoutMs),
       });
+      // The deadline also covers a body that arrives slowly after the headers.
+      text = await response.text();
     } catch (error) {
       if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
         // WordPress may still finish the request after we stop waiting, so
@@ -86,7 +89,6 @@ export class WordPressClient {
       throw error;
     }
 
-    const text = await response.text();
     let parsed: unknown = {};
 
     if (text !== "") {
