@@ -635,9 +635,21 @@ if (! function_exists('get_the_terms')) {
 }
 
 if (! function_exists('get_post_field')) {
-    function get_post_field(string $field, int $postId): string
+    function get_post_field(string $field, int $postId, string $context = 'display'): string
     {
+        if ($field === 'post_title' && ! isset($GLOBALS['wp_test_post_fields'][$postId][$field])) {
+            return (string) ($GLOBALS['wp_test_post_titles'][$postId] ?? '');
+        }
+
         return (string) ($GLOBALS['wp_test_post_fields'][$postId][$field] ?? '');
+    }
+}
+
+if (! function_exists('wp_get_original_image_path')) {
+    function wp_get_original_image_path(int $attachmentId): string|false
+    {
+        return $GLOBALS['wp_test_original_image_paths'][$attachmentId]
+            ?? ($GLOBALS['wp_test_attachment_files'][$attachmentId] ?? false);
     }
 }
 

@@ -125,6 +125,51 @@ final class ContentAndMediaTest extends LiveTestCase
     }
 
     #[Test]
+    public function it_keeps_large_images_that_wordpress_scales_and_titles_it_rewrites(): void
+    {
+        $bytes = file_get_contents(__DIR__ . '/fixtures/large-3000x2000.jpg');
+        self::assertIsString($bytes);
+        $stamp = $this->faker->unique()->numerify('####');
+
+        $post = $this->api('POST', '/content', [
+            'type' => 'post',
+            'title' => 'Large image ' . $stamp,
+            'status' => 'draft',
+        ]);
+        self::assertSame(201, $post['status'], (string) json_encode($post['body']));
+        $postId = (int) $post['body']['id'];
+        $this->postIds[] = $postId;
+
+        $payload = [
+            'title' => "Anh's photo -- \"big\" & wide " . $stamp,
+            'image_type' => 'featured',
+            'content_base64' => base64_encode($bytes),
+            'alt_text' => 'Large ' . $stamp,
+            'post_id' => $postId,
+            'set_featured' => true,
+        ];
+        $upload = $this->api('POST', '/media', $payload);
+
+        self::assertSame(201, $upload['status'], (string) json_encode($upload['body']));
+        $mediaId = (int) $upload['body']['id'];
+        $this->mediaIds[] = $mediaId;
+        self::assertTrue((bool) ($upload['body']['verification']['passed'] ?? false));
+        self::assertTrue((bool) ($upload['body']['verification']['scaled'] ?? false));
+        self::assertTrue((bool) ($upload['body']['verification']['sha256_match'] ?? false));
+        self::assertTrue((bool) ($upload['body']['verification']['featured_set'] ?? false));
+        self::assertFalse((bool) ($upload['body']['verification']['reused'] ?? true));
+
+        $fetched = $this->api('GET', '/content/' . $postId);
+        self::assertSame($mediaId, (int) ($fetched['body']['featured_media'] ?? 0));
+
+        // A client that timed out retries with the same bytes: same attachment, no duplicate.
+        $retry = $this->api('POST', '/media', $payload);
+        self::assertSame(201, $retry['status'], (string) json_encode($retry['body']));
+        self::assertSame($mediaId, (int) $retry['body']['id']);
+        self::assertTrue((bool) ($retry['body']['verification']['reused'] ?? false));
+    }
+
+    #[Test]
     public function it_lists_orphans_broken_refs_and_adopts_the_seeded_file(): void
     {
         $orphans = $this->api('GET', '/media/orphans');

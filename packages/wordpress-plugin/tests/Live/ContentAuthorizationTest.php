@@ -192,6 +192,29 @@ final class ContentAuthorizationTest extends LiveTestCase
     }
 
     #[Test]
+    public function it_never_reuses_another_users_upload_with_the_same_bytes(): void
+    {
+        $bytes = file_get_contents(__DIR__ . '/fixtures/large-3000x2000.jpg');
+        self::assertIsString($bytes);
+        $payload = [
+            'title' => $this->faker->unique()->sentence(4),
+            'image_type' => 'inline',
+            'content_base64' => base64_encode($bytes),
+        ];
+
+        $adminUpload = $this->api('POST', '/media', $payload);
+        self::assertSame(201, $adminUpload['status'], (string) json_encode($adminUpload['body']));
+        $this->mediaIds[] = (int) $adminUpload['body']['id'];
+
+        $limitedUpload = $this->contributorClient->request('POST', '/media', $payload);
+        self::assertSame(201, $limitedUpload['status'], (string) json_encode($limitedUpload['body']));
+        $this->mediaIds[] = (int) $limitedUpload['body']['id'];
+
+        self::assertNotSame((int) $adminUpload['body']['id'], (int) $limitedUpload['body']['id']);
+        self::assertFalse((bool) ($limitedUpload['body']['verification']['reused'] ?? true));
+    }
+
+    #[Test]
     public function it_does_not_list_another_users_unpublished_templates(): void
     {
         $unpublishedTemplateIds = [

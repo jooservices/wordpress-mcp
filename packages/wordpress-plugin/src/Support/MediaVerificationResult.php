@@ -30,6 +30,8 @@ final class MediaVerificationResult
             'featured_set' => false,
             'failed_step' => null,
             'metadata_mismatch' => null,
+            'scaled' => false,
+            'warnings' => [],
         ];
 
         return array_merge($defaults, $overrides);
