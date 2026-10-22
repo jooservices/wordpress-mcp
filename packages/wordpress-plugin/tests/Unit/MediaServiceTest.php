@@ -133,6 +133,7 @@ final class MediaServiceTest extends TestCase
     {
         $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
         self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
         $chunkData = 'changed';
         $chunk = pack('N', strlen($chunkData)) . 'tEXt' . $chunkData . pack('N', crc32('tEXt' . $chunkData));
         $changedPng = substr($png, 0, -12) . $chunk . substr($png, -12);
