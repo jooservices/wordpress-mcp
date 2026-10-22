@@ -8,6 +8,7 @@ export type McpServerOptions = {
   resourceMetadataUrl?: string;
   disabledTools: ReadonlySet<string>;
   enabledTools?: ReadonlySet<string>;
+  allowAnonymousRead?: boolean;
   observability: McpObservabilityHandler;
   protocolVersionPolicy: ProtocolVersionPolicy;
   activeSiteStore: ActiveSiteStore;

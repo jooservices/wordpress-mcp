@@ -59,6 +59,7 @@ function getMcpServerOptions() {
     resourceMetadataUrl: oauthRuntime?.resourceMetadataUrl,
     disabledTools: config.mcpDisabledTools,
     enabledTools: config.mcpEnabledTools,
+    allowAnonymousRead: config.mcpAllowAnonymousRead,
     observability,
     protocolVersionPolicy: config.mcpProtocolVersionPolicy,
     activeSiteStore,
@@ -205,13 +206,8 @@ function mcpAuthMiddleware(req: Request, res: Response, next: () => void): void 
     return;
   }
 
-  if (config.mcpAuthMode === "oauth" && oauthRuntime) {
-    oauthRuntime.strictBearer(req, res, next);
-    return;
-  }
-
-  if (config.mcpAuthMode === "mixed" && oauthRuntime) {
-    mixedBearerBeforeJson(req, res, next);
+  if ((config.mcpAuthMode === "oauth" || config.mcpAuthMode === "mixed") && oauthRuntime) {
+    oauthBearerBeforeJson(req, res, next);
     return;
   }
 
@@ -238,7 +234,7 @@ function sendMcpInternalError(res: Response): void {
   });
 }
 
-function mixedBearerBeforeJson(req: Request, res: Response, next: () => void): void {
+function oauthBearerBeforeJson(req: Request, res: Response, next: () => void): void {
   const header = req.headers.authorization;
   if (header === undefined) {
     next();
@@ -271,7 +267,7 @@ const authenticatedMcpJsonParser = express.json({ limit: config.mcpJsonBodyLimit
 const anonymousMixedMcpJsonParser = express.json({ limit: "1mb" });
 
 function parseMcpJson(req: Request, res: Response, next: () => void): void {
-  const parser = config.mcpAuthMode === "mixed" && !req.auth
+  const parser = (config.mcpAuthMode === "mixed" || config.mcpAuthMode === "oauth") && !req.auth
     ? anonymousMixedMcpJsonParser
     : authenticatedMcpJsonParser;
   parser(req, res, next);

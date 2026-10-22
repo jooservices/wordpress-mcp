@@ -98,6 +98,7 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_HOST` | No | Default `0.0.0.0` |
 | `MCP_PUBLISH` | No | Host port mapping (default `127.0.0.1:3000:3000`) |
 | `MCP_DISABLED_TOOLS` | No | Comma-separated tools to disable (e.g. `wordpress_delete_content`) |
+| `MCP_ALLOW_ANONYMOUS_READ` | No | `1` lets unauthenticated callers run read tools in `mixed`/`oauth` mode (default: OAuth token with read scope required) |
 | `MCP_ENABLED_TOOLS` | No | Allowlist: when set, only these tools (and their resource mirrors) can run |
 | `MCP_PROTOCOL_VERSION_POLICY` | No | `fallback` (default) or `reject` for MCP protocol version negotiation |
 | `MCP_OBSERVABILITY_ENABLED` | No | Default on. Structured JSON events per tool call |

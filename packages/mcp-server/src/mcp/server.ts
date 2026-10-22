@@ -2032,7 +2032,10 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
   registerWordPressResources(server, registry, options);
 
   if (options.authMode === "mixed" || options.authMode === "oauth") {
-    patchToolsWithSecuritySchemes(server);
+    patchToolsWithSecuritySchemes(server, {
+      authMode: options.authMode,
+      allowAnonymousRead: options.allowAnonymousRead,
+    });
   }
 
   return server;
