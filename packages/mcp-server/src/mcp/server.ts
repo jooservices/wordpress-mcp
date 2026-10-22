@@ -1437,7 +1437,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       name: "wordpress_upload_media",
       title: "Upload WordPress media",
       description:
-        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256), verifies stored file, metadata, subsizes, and public URL before returning. Use attachment ID only when verification.passed is true. The public URL check is advisory (verification.public_url_warning). Idempotent: re-uploading the same bytes for the same post_id returns the existing attachment (idempotent_replay: true) instead of creating a duplicate, so retrying after a timeout is safe. If setting the featured image fails the media is kept and verification.featured_set is false with featured_error/featured_step. Call wordpress_get_site for upload limits. Optionally set featured image with post_id + set_featured after verification passes.",
+        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256), verifies stored file, metadata, subsizes, and public URL before returning. Use attachment ID only when verification.passed is true. The public URL check is advisory (verification.public_url_warning). Idempotent: re-uploading the same bytes for the same post_id, including when post_id is omitted, returns the existing attachment (idempotent_replay: true) instead of creating a duplicate, so retrying after a timeout is safe. If setting the featured image fails the media is kept and verification.featured_set is false with featured_error/featured_step. Call wordpress_get_site for upload limits. Optionally set featured image with post_id + set_featured after verification passes.",
       inputSchema: uploadMediaSchema,
       access: "write",
       dto: { kind: "media" },
@@ -1448,7 +1448,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const passed = verification?.passed === true;
       const warnings: string[] = [];
       if (item.idempotent_replay === true) {
-        warnings.push("this file was already uploaded for this post, so the existing attachment was returned (no duplicate created)");
+        warnings.push("this file was already uploaded for the same target, so the existing attachment was returned (no duplicate created)");
       }
       if (verification?.featured_error) {
         warnings.push(`the media was stored but the featured image was NOT set (${verification.featured_step ?? verification.featured_error}); set it with wordpress_update_content instead of re-uploading`);

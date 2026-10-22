@@ -151,12 +151,8 @@ final class MediaService
 
         $targetPostId = max(0, (int) ($data['post_id'] ?? 0));
 
-        // The idempotency key is sha256 + post. Without a post there is no key:
-        // the same bytes are legitimately uploaded again as separate media.
-        if ($targetPostId === 0) {
-            return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, 0, '', '');
-        }
-
+        // A missing post is normalized to zero and remains part of the key,
+        // so retries without a target post also resolve to the same attachment.
         $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
 
         if ($existingId !== null) {

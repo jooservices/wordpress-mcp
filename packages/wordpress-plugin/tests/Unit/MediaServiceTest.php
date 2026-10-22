@@ -129,12 +129,21 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
-    public function it_does_not_apply_the_idempotency_key_to_uploads_without_a_post(): void
+    public function it_returns_the_existing_attachment_when_the_same_file_is_retried_without_a_post(): void
     {
         $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
         self::assertNotFalse($png);
+        $path = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/nopost-replay-' . uniqid() . '.png';
+        $this->writeMinimalPng($path);
+
         $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
         $GLOBALS['wp_test_sideload_calls'] = 0;
+        $GLOBALS['wp_test_posts'][9100] = new \WP_Post(9100, '', 'attachment');
+        $GLOBALS['wp_test_posts'][9100]->post_status = 'inherit';
+        $GLOBALS['wp_test_attachment_files'][9100] = $path;
+        $GLOBALS['wp_test_attachment_urls'][9100] = 'https://example.test/wp-content/uploads/nopost-replay.png';
+        $GLOBALS['wp_test_attachment_mimes'][9100] = 'image/png';
+        $GLOBALS['wp_test_attachment_metadata'][9100] = ['width' => 1, 'height' => 1, 'sizes' => []];
         $GLOBALS['wp_test_postmeta'][9100] = [
             '_mcp_media_upload_sha256' => hash('sha256', $png),
             '_mcp_media_upload_post_id' => '0',
@@ -142,8 +151,13 @@ final class MediaServiceTest extends TestCase
 
         $result = (new MediaService())->upload(['file_name' => 'nopost.png', 'content_base64' => base64_encode($png)]);
 
-        self::assertSame('upload.sideload', $result['error_step']);
-        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Without a post the same bytes are stored again.');
+        self::assertNull($result['error']);
+        self::assertSame(9100, $result['media']['id']);
+        self::assertTrue($result['media']['idempotent_replay']);
+        self::assertSame(0, $GLOBALS['wp_test_sideload_calls'], 'A retry without a post must reuse the stored attachment.');
+        self::assertCount(1, $GLOBALS['wp_test_posts'], 'A retry without a post must not create a duplicate attachment.');
+
+        unlink($path);
     }
 
     #[Test]
@@ -186,20 +200,19 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
-    public function it_rejects_an_overlapping_retry_while_the_upload_key_is_reserved(): void
+    public function it_rejects_an_overlapping_retry_without_a_post_while_the_upload_key_is_reserved(): void
     {
         $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
         self::assertNotFalse($png);
         $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
         add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
 
-        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
         $GLOBALS['wp_test_options'][$lockName] = (string) time();
 
         $result = (new MediaService())->upload([
             'file_name' => 'racing.png',
             'content_base64' => base64_encode($png),
-            'post_id' => 70,
         ]);
 
         self::assertNull($result['media']);

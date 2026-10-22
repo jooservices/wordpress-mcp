@@ -21,13 +21,14 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     await session.close();
   });
 
-  it("uploads a 320px PNG with public URL verification", async () => {
-    const uploaded = await session.expectSuccess("wordpress_upload_media", {
+  it("uploads a 320px PNG with public URL verification and safely replays a no-post retry", async () => {
+    const args = {
       title: `E2E small ${stamp}`,
       image_type: "inline",
       content_base64: fixtureBase64("e2e-small.png"),
       alt_text: `Small ${stamp}`,
-    });
+    };
+    const uploaded = await session.expectSuccess("wordpress_upload_media", args);
     const id = Number(uploaded.structuredContent?.id);
     expect(id).toBeGreaterThan(0);
     createdIds.push(id);
@@ -38,6 +39,10 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     expect(verification?.passed, `small upload verification: ${JSON.stringify(verification)}`).toBe(true);
     expect(verification?.public_url_ok).toBe(true);
     expect(verification?.sha256_match).toBe(true);
+
+    const retry = await session.expectSuccess("wordpress_upload_media", args);
+    expect(Number(retry.structuredContent?.id)).toBe(id);
+    expect(retry.structuredContent?.idempotent_replay).toBe(true);
 
     const fetched = await session.expectSuccess("wordpress_get_media", { id, verify: true });
     expect((fetched.structuredContent?.verification as { passed?: boolean } | undefined)?.passed).toBe(true);
