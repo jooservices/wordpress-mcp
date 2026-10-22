@@ -12,6 +12,28 @@ final class AuditLogger
 
     private const DEFAULT_RETENTION_DAYS = 90;
 
+    private const UNAUTHENTICATED_DENIAL_THROTTLE = 'jooservices_mcp_unauth_denied_log_throttle';
+
+    private const UNAUTHENTICATED_DENIAL_THROTTLE_SECONDS = 60;
+
+    public function logUnauthenticatedDenied(string $requestId, ?string $route): void
+    {
+        if (
+            get_transient(self::UNAUTHENTICATED_DENIAL_THROTTLE) !== false
+            || ! set_transient(
+                self::UNAUTHENTICATED_DENIAL_THROTTLE,
+                1,
+                self::UNAUTHENTICATED_DENIAL_THROTTLE_SECONDS,
+            )
+        ) {
+            return;
+        }
+
+        $this->log(null, $requestId, 'denied', 'auth', $route, false, [
+            'reason' => 'authentication_failed',
+        ]);
+    }
+
     /**
      * @param array<string, mixed>|null $metadata
      */

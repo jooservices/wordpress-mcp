@@ -47,6 +47,8 @@ final class SettingsService
      */
     public function update(array $data): array
     {
+        $sanitizedOptions = [];
+
         foreach ($data as $option => $value) {
             if (! array_key_exists($option, self::OPTIONS)) {
                 return ['settings' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
@@ -65,12 +67,16 @@ final class SettingsService
                 return ['settings' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
             }
 
+            $sanitizedOptions[$option] = $sanitized;
+        }
+
+        foreach ($sanitizedOptions as $option => $sanitized) {
             if (get_option($option) !== $sanitized && ! update_option($option, $sanitized)) {
                 return ['settings' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
             }
         }
 
-        if (array_key_exists('permalink_structure', $data)) {
+        if (array_key_exists('permalink_structure', $sanitizedOptions)) {
             flush_rewrite_rules();
         }
 
