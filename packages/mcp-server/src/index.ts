@@ -11,6 +11,7 @@ import { createObservabilityHandler } from "./mcp/observability.js";
 import { ActiveSiteStore } from "./mcp/activeSiteStore.js";
 import { runWithMcpSession } from "./mcp/mcpSessionContext.js";
 import { SessionManager } from "./mcp/sessionManager.js";
+import { createRecoveredTransport, isRecoverableSessionId } from "./mcp/sessionRecovery.js";
 import { SUPPORTED_PROTOCOL_VERSIONS, patchVersionNegotiation } from "./mcp/versionNegotiator.js";
 import { SiteRegistry } from "./sites/registry.js";
 
@@ -70,6 +71,31 @@ function getServer() {
   return server;
 }
 
+/**
+ * Looks up a live session or, when the id is one this server could have issued, rebuilds it so the
+ * client does not have to re-link after a restart or idle eviction.
+ */
+async function resolveSession(sessionId: string): Promise<StreamableHTTPServerTransport | undefined> {
+  const existing = sessions.get(sessionId);
+  if (existing) {
+    return existing as StreamableHTTPServerTransport;
+  }
+
+  if (!isRecoverableSessionId(sessionId)) {
+    return undefined;
+  }
+
+  const transport = createRecoveredTransport(sessionId, () => sessions.remove(sessionId));
+  await getServer().connect(transport);
+  const evicted = sessions.set(sessionId, transport);
+  if (evicted) {
+    observability.recordEvent("mcp.session.evicted", { session_id: evicted, reason: "capacity" });
+  }
+  observability.recordEvent("mcp.session.recovered", { session_id: sessionId });
+
+  return transport;
+}
+
 const app = express();
 if (config.trustProxy) {
   app.set("trust proxy", true);
@@ -106,9 +132,9 @@ async function handleMcpPost(req: Request, res: Response): Promise<void> {
     let transport: StreamableHTTPServerTransport;
 
     if (sessionId) {
-      const existing = sessions.get(sessionId);
+      const existing = await resolveSession(sessionId);
       if (existing) {
-        transport = existing as StreamableHTTPServerTransport;
+        transport = existing;
       } else {
         res.status(404).json({
           jsonrpc: "2.0",
@@ -257,13 +283,14 @@ app.post("/mcp", mcpAuthMiddleware, parseMcpJson, (req, res) => {
 
 app.get("/mcp", mcpAuthMiddleware, async (req, res) => {
   const sessionId = req.headers["mcp-session-id"] as string | undefined;
-  if (!sessionId || !sessions.get(sessionId)) {
+  const transport = sessionId ? await resolveSession(sessionId) : undefined;
+  if (!sessionId || !transport) {
     res.status(400).send("Invalid or missing session ID");
     return;
   }
 
   await runWithMcpSession(sessionId, () =>
-    runWithAuth(req.auth, () => sessions.get(sessionId)?.handleRequest(req, res)),
+    runWithAuth(req.auth, () => transport.handleRequest(req, res)),
   );
 });
 

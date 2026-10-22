@@ -45,6 +45,8 @@ export function setupOAuth(app: Express, config: Config): OAuthRuntime {
     validateResource,
     tokenTtlSeconds: config.oauthTokenTtlSeconds,
     refreshTtlSeconds: config.oauthRefreshTtlSeconds,
+    refreshGraceSeconds: config.oauthRefreshGraceSeconds,
+    clientRetentionMs: config.oauthClientRetentionMs,
   });
   const oauthMetadata = createOAuthMetadata({
     provider,

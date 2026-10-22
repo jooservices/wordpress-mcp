@@ -13,6 +13,8 @@ export interface Config {
   oauthIssuerUrl: string;
   oauthTokenTtlSeconds: number;
   oauthRefreshTtlSeconds: number;
+  oauthRefreshGraceSeconds: number;
+  oauthClientRetentionMs: number;
   oauthDataDir: string;
   oauthRateLimit: OAuthRateLimitConfig;
   trustProxy: boolean;
@@ -128,6 +130,8 @@ export function loadConfig(): Config {
     oauthIssuerUrl,
     oauthTokenTtlSeconds: Number(process.env.OAUTH_TOKEN_TTL_SECONDS ?? 3600),
     oauthRefreshTtlSeconds: Number(process.env.OAUTH_REFRESH_TTL_SECONDS ?? 7_776_000),
+    oauthRefreshGraceSeconds: parsePositiveInt(process.env.OAUTH_REFRESH_GRACE_SECONDS, 120),
+    oauthClientRetentionMs: parsePositiveInt(process.env.OAUTH_CLIENT_RETENTION_DAYS, 7) * 24 * 60 * 60 * 1000,
     oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
     oauthRateLimit: parseOAuthRateLimit(),
     trustProxy: parseBoolean(process.env.MCP_TRUST_PROXY, true),
