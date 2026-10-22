@@ -714,6 +714,10 @@ if (! function_exists('media_handle_sideload')) {
     {
         $GLOBALS['wp_test_sideload_calls'] = ($GLOBALS['wp_test_sideload_calls'] ?? 0) + 1;
 
+        if (isset($GLOBALS['wp_test_sideload_hook'])) {
+            ($GLOBALS['wp_test_sideload_hook'])();
+        }
+
         return new WP_Error('sideload_failed', 'stub');
     }
 }

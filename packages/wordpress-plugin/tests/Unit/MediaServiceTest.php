@@ -174,6 +174,54 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_does_not_let_a_retry_take_over_the_lock_of_an_active_upload(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $payload = ['file_name' => 'active.png', 'content_base64' => base64_encode($png)];
+        $retry = null;
+        $GLOBALS['wp_test_sideload_hook'] = static function () use (&$retry, $payload): void {
+            // The first request is mid-sideload with its idempotency meta not stored yet.
+            $retry = (new MediaService())->upload($payload);
+        };
+
+        try {
+            (new MediaService())->upload($payload);
+        } finally {
+            unset($GLOBALS['wp_test_sideload_hook']);
+        }
+
+        self::assertSame('upload.in_progress', $retry['error_step']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Only one sideload may run.');
+    }
+
+    #[Test]
+    public function it_only_releases_a_lock_it_still_owns(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $foreign = 'other-owner|' . (time() + 300);
+        $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, $foreign): void {
+            // A takeover replaced the lock while this request was still running.
+            $GLOBALS['wp_test_options'][$lockName] = $foreign;
+        };
+
+        try {
+            (new MediaService())->upload(['file_name' => 'owner.png', 'content_base64' => base64_encode($png)]);
+        } finally {
+            unset($GLOBALS['wp_test_sideload_hook']);
+        }
+
+        self::assertSame($foreign, $GLOBALS['wp_test_options'][$lockName] ?? null, 'Another owner\'s lock must survive.');
+    }
+
+    #[Test]
     public function it_keeps_the_media_and_reports_when_setting_the_featured_image_fails(): void
     {
         $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';

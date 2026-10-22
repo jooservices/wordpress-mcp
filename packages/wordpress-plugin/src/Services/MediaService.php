@@ -160,7 +160,9 @@ final class MediaService
         // so an overlapping retry cannot also miss it and create a duplicate.
         $lockName = self::UPLOAD_LOCK_OPTION_PREFIX . substr(hash('sha256', $preCheck['sha256'] . ':' . $targetPostId), 0, 40);
 
-        if (! $this->acquireUploadLock($lockName)) {
+        $lockToken = $this->acquireUploadLock($lockName);
+
+        if ($lockToken === null) {
             $waitMs = max(0, (int) apply_filters('jooservices_mcp_upload_lock_wait_ms', 3000));
             $existingId = $this->waitForUploadKey($preCheck['sha256'], $targetPostId, $waitMs);
 
@@ -180,9 +182,9 @@ final class MediaService
                 return $this->replayUpload($existingId, $data);
             }
 
-            return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, $targetPostId);
+            return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, $targetPostId, $lockName, $lockToken);
         } finally {
-            delete_option($lockName);
+            $this->releaseUploadLock($lockName, $lockToken);
         }
     }
 
@@ -192,20 +194,23 @@ final class MediaService
      * @param array<string, mixed> $preCheck
      * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
      */
-    private function storeUpload(array $data, array $naming, array $preCheck, string $content, string $fileName, int $targetPostId): array
+    private function storeUpload(array $data, array $naming, array $preCheck, string $content, string $fileName, int $targetPostId, string $lockName, string $lockToken): array
     {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
+        $this->renewUploadLock($lockName, $lockToken);
         $attachmentId = $this->sideloadAttachment($fileName, $preCheck['mime'], $content);
 
         if ($attachmentId === null) {
             return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.sideload');
         }
 
+        $this->renewUploadLock($lockName, $lockToken);
         $metadata = wp_generate_attachment_metadata($attachmentId, (string) get_attached_file($attachmentId));
         wp_update_attachment_metadata($attachmentId, $metadata);
+        $this->renewUploadLock($lockName, $lockToken);
 
         $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
 
@@ -767,24 +772,63 @@ final class MediaService
 
     /**
      * Atomic reservation: `add_option()` fails when the option row already
-     * exists (unique option_name), so only one request holds a given key. A
-     * lock older than the TTL is treated as left by a crashed request.
+     * exists (unique option_name), so only one request holds a given key. The
+     * value is `<owner token>|<lease expiry>`; the holder renews the lease at
+     * each slow step, so a lease only expires when its request crashed or
+     * stalled, and only then may another request take it over. Returns the
+     * owner token, or null when the key is held.
      */
-    private function acquireUploadLock(string $lockName): bool
+    private function acquireUploadLock(string $lockName): ?string
     {
-        if (add_option($lockName, (string) time(), '', false)) {
-            return true;
+        $token = bin2hex(random_bytes(16));
+
+        if (add_option($lockName, $this->lockValue($token), '', false)) {
+            return $token;
         }
 
-        $heldSince = (int) get_option($lockName, 0);
-
-        if ($heldSince > 0 && time() - $heldSince < self::UPLOAD_LOCK_TTL_SECONDS) {
-            return false;
+        if (time() < $this->lockExpiry((string) get_option($lockName, ''))) {
+            return null;
         }
 
         delete_option($lockName);
 
-        return (bool) add_option($lockName, (string) time(), '', false);
+        return add_option($lockName, $this->lockValue($token), '', false) ? $token : null;
+    }
+
+    /** Extends the lease, but only while this request still owns the lock. */
+    private function renewUploadLock(string $lockName, string $token): void
+    {
+        if ($this->lockOwner((string) get_option($lockName, '')) === $token) {
+            update_option($lockName, $this->lockValue($token));
+        }
+    }
+
+    /** Releases the lock only when this request still owns it. */
+    private function releaseUploadLock(string $lockName, string $token): void
+    {
+        if ($this->lockOwner((string) get_option($lockName, '')) === $token) {
+            delete_option($lockName);
+        }
+    }
+
+    private function lockValue(string $token): string
+    {
+        return $token . '|' . (time() + self::UPLOAD_LOCK_TTL_SECONDS);
+    }
+
+    private function lockOwner(string $value): string
+    {
+        return str_contains($value, '|') ? explode('|', $value, 2)[0] : '';
+    }
+
+    /** Legacy bare-timestamp values count as acquired-at plus the TTL. */
+    private function lockExpiry(string $value): int
+    {
+        if (str_contains($value, '|')) {
+            return (int) explode('|', $value, 2)[1];
+        }
+
+        return (int) $value > 0 ? (int) $value + self::UPLOAD_LOCK_TTL_SECONDS : 0;
     }
 
     private function waitForUploadKey(string $sha256, int $postId, int $waitMs): ?int
