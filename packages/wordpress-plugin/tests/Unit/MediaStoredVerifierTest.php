@@ -114,6 +114,29 @@ final class MediaStoredVerifierTest extends TestCase
     }
 
     #[Test]
+    public function it_verifies_the_original_file_when_wordpress_made_a_scaled_copy(): void
+    {
+        add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);
+
+        $scaledPath = tempnam(sys_get_temp_dir(), 'mcp-media-scaled-');
+        self::assertNotFalse($scaledPath);
+        file_put_contents($scaledPath, $this->pngBytes . 'x');
+
+        $GLOBALS['wp_test_attachment_files'][501] = $scaledPath;
+        $GLOBALS['wp_test_original_image_files'] = [501 => $this->pngPath];
+
+        try {
+            $result = MediaStoredVerifier::verifyAttachment(501, hash('sha256', $this->pngBytes));
+        } finally {
+            unlink($scaledPath);
+            unset($GLOBALS['wp_test_original_image_files']);
+        }
+
+        self::assertNull($result['step']);
+        self::assertTrue($result['verification']['sha256_match']);
+    }
+
+    #[Test]
     public function it_detects_checksum_mismatch_after_file_mutation(): void
     {
         add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);
