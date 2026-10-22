@@ -12,6 +12,7 @@ import { OAUTH_SCOPES } from "../src/auth/types.js";
 const redirectUri = "https://chatgpt.com/connector/oauth/callback";
 const issuerUrl = new URL("https://mcp.example.com");
 const mcpResourceUrl = new URL("https://mcp.example.com/mcp");
+const approvalSecret = "owner-approval-secret";
 
 async function withOAuthServer(
   dataDir: string,
@@ -22,6 +23,7 @@ async function withOAuthServer(
     tokenTtlSeconds: 3600,
     refreshTtlSeconds: 7_776_000,
     validateResource: (resource) => resource?.href === mcpResourceUrl.href,
+    approvalSecret,
   });
 
   const app = express();
@@ -117,16 +119,15 @@ describe("OAuth HTTP endpoints", () => {
         redirect: "manual",
       });
 
-      if (authorizeResponse.status !== 302) {
-        const errorBody = await authorizeResponse.text();
-        throw new Error(`Authorize failed (${authorizeResponse.status}): ${errorBody}`);
-      }
+      // No code is issued until the site owner approves on the consent page.
+      expect(authorizeResponse.status).toBe(200);
+      expect(authorizeResponse.headers.get("location")).toBeNull();
+      const consentHtml = await authorizeResponse.text();
+      const requestId = /name="request_id" value="([^"]+)"/.exec(consentHtml)?.[1];
+      expect(requestId).toBeTruthy();
 
-      expect(authorizeResponse.status).toBe(302);
-      const location = authorizeResponse.headers.get("location");
-      expect(location).toBeTruthy();
-
-      const callbackUrl = new URL(location!);
+      const location = await provider.completeAuthorization(requestId!, approvalSecret, "approve");
+      const callbackUrl = new URL(location);
       const code = callbackUrl.searchParams.get("code");
       expect(code).toBeTruthy();
 
@@ -206,6 +207,48 @@ describe("OAuth HTTP endpoints", () => {
       expect(refreshResponse.status).toBeGreaterThanOrEqual(400);
       const body = (await refreshResponse.json()) as { error: string };
       expect(body.error).not.toBe("invalid_client");
+    });
+  });
+
+  it("refuses a wrong approval secret and reports a denial back to the client", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oauth-http-consent-"));
+    dirs.push(dir);
+
+    await withOAuthServer(dir, async (baseUrl, provider) => {
+      const registerResponse = await fetch(`${baseUrl}/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ redirect_uris: [redirectUri], token_endpoint_auth_method: "none", client_name: "<b>x</b>" }),
+      });
+      const client = (await registerResponse.json()) as { client_id: string };
+      const { code_challenge } = await pkceChallenge();
+
+      const startAuthorization = async (): Promise<string> => {
+        const params = new URLSearchParams({
+          client_id: client.client_id,
+          redirect_uri: redirectUri,
+          response_type: "code",
+          code_challenge,
+          code_challenge_method: "S256",
+          state: "s1",
+          resource: mcpResourceUrl.href,
+        });
+        const response = await fetch(`${baseUrl}/authorize?${params.toString()}`, { redirect: "manual" });
+        const html = await response.text();
+        expect(html).not.toContain("<b>x</b>");
+        return /name="request_id" value="([^"]+)"/.exec(html)![1]!;
+      };
+
+      const first = await startAuthorization();
+      await expect(provider.completeAuthorization(first, "wrong-secret", "approve")).rejects.toMatchObject({ status: 403 });
+      // The request is single-use: the right secret afterwards does not revive it.
+      await expect(provider.completeAuthorization(first, approvalSecret, "approve")).rejects.toMatchObject({ status: 400 });
+
+      const second = await startAuthorization();
+      const denied = new URL(await provider.completeAuthorization(second, "", "deny"));
+      expect(denied.searchParams.get("error")).toBe("access_denied");
+      expect(denied.searchParams.get("state")).toBe("s1");
+      expect(denied.searchParams.get("code")).toBeNull();
     });
   });
 });

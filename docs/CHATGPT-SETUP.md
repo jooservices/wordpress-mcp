@@ -10,12 +10,14 @@
 
 | ChatGPT connector | MCP `MCP_AUTH_MODE` | Notes |
 |-------------------|----------------------|-------|
-| **Mixed** (recommended) | `mixed` | Read tools work anonymously; write tools trigger OAuth linking |
+| **Mixed** (recommended) | `mixed` | Tools are listed without sign-in; every tool call needs OAuth (read scope for reads, write scope for writes). `MCP_ALLOW_ANONYMOUS_READ=true` restores anonymous reads for private endpoints only |
 | **OAuth** | `oauth` | All requests require OAuth token |
 | **No Auth** (dev only) | `none` + `MCP_AUTH_DISABLED=true` | Never use on public URLs |
 | Static bearer (legacy) | `static` + `MCP_AUTH_SECRET` | For clients that send Bearer tokens |
 
 Production default: **`MCP_AUTH_MODE=mixed`**.
+
+Linking a connector opens a consent page served by the MCP server. The site owner enters `MCP_OAUTH_APPROVAL_SECRET` and chooses **Approve**; without it no authorization code is issued. Ten wrong secrets from one address block approvals for 15 minutes.
 
 ## Production deploy (Docker)
 

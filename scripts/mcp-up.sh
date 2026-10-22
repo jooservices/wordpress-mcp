@@ -268,11 +268,21 @@ PY
     fi
   fi
 
+  approval_secret=""
+  if [[ "$auth_mode" == "mixed" || "$auth_mode" == "oauth" ]]; then
+    approval_secret="$(ask "OAuth approval secret you will type to approve connections (blank = generate)" "")"
+    if [[ -z "$approval_secret" ]]; then
+      approval_secret="$(python3 -c 'import secrets; print(secrets.token_urlsafe(18))')"
+      echo "Generated MCP_OAUTH_APPROVAL_SECRET: $approval_secret (also saved in $ENV_FILE). You need it to approve ChatGPT/Claude."
+    fi
+  fi
+
   umask 077
   SITES_JSON="$sites_json" \
   PUBLIC_URL="$public_url" \
   AUTH_MODE="$auth_mode" \
   AUTH_SECRET="$auth_secret" \
+  APPROVAL_SECRET="$approval_secret" \
   PUBLISH_MODE="$publish_mode" \
   MCP_DOMAIN="$mcp_domain" \
   ACME_EMAIL="$acme_email" \
@@ -292,6 +302,7 @@ lines = [
     f"MCP_PUBLIC_URL={os.environ['PUBLIC_URL']}",
     f"MCP_AUTH_MODE={os.environ['AUTH_MODE']}",
     f"MCP_AUTH_SECRET={json.dumps(os.environ['AUTH_SECRET'])}",
+    f"MCP_OAUTH_APPROVAL_SECRET={json.dumps(os.environ['APPROVAL_SECRET'])}",
     "MCP_AUTH_DISABLED=false",
     "MCP_PORT=3000",
     "MCP_HOST=0.0.0.0",

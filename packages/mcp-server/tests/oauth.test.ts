@@ -213,4 +213,33 @@ describe("WordPressOAuthProvider", () => {
 
     await expect(provider.verifyAccessToken(tokens.access_token)).rejects.toThrow("Invalid or expired token");
   });
+
+  it("answers a repeated refresh within the grace window with the same tokens", async () => {
+    const dir = createTempDir();
+    dirs.push(dir);
+
+    const provider = createOAuthProvider({ dataDir: dir });
+    const client = createClient("grace-client");
+    await provider.clientsStore.registerClient!(client);
+
+    const store = new FileOAuthStore(dir);
+    await store.saveAuthCode("auth-code-grace", {
+      client,
+      params: { redirectUri, codeChallenge: "challenge", scopes: [OAUTH_SCOPES.READ] },
+      createdAt: Date.now(),
+    });
+
+    const initial = await provider.exchangeAuthorizationCode(client, "auth-code-grace");
+    const [first, second] = await Promise.all([
+      provider.exchangeRefreshToken(client, initial.refresh_token!),
+      provider.exchangeRefreshToken(client, initial.refresh_token!),
+    ]);
+
+    expect(second.access_token).toBe(first.access_token);
+    expect(second.refresh_token).toBe(first.refresh_token);
+    await expect(provider.verifyAccessToken(first.access_token)).resolves.toMatchObject({ clientId: "grace-client" });
+
+    const next = await provider.exchangeRefreshToken(client, first.refresh_token!);
+    expect(next.access_token).not.toBe(first.access_token);
+  });
 });

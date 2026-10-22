@@ -32,6 +32,13 @@ export interface ToolPolicyOptions {
    * in the allowlist and not in the disable list.
    */
   enabledTools?: ReadonlySet<string>;
+  /**
+   * Mixed mode only: lets callers without an OAuth token run read tools.
+   * Off by default because the WordPress connection token usually belongs to
+   * an administrator, so anonymous reads expose drafts, users and comments
+   * (JOOWM-2). Enable only for sites whose MCP endpoint is not public.
+   */
+  allowAnonymousRead?: boolean;
 }
 
 function denied(message: string): ToolResult {
@@ -57,15 +64,28 @@ export function assertToolPermission(
     return denied(`Tool "${toolName}" is disabled on this server.`);
   }
 
-  if (access === "read") {
-    return null;
-  }
-
   if (options.authMode === "none" || options.authMode === "static") {
     return null;
   }
 
   const auth = getRequestAuth();
+
+  if (access === "read") {
+    if (options.authMode === "mixed" && options.allowAnonymousRead === true) {
+      return null;
+    }
+
+    if (hasOAuthScope(auth?.scopes, OAUTH_SCOPES.READ) || hasOAuthScope(auth?.scopes, OAUTH_SCOPES.WRITE)) {
+      return null;
+    }
+
+    return authChallenge(
+      "Sign in to read WordPress data.",
+      options.resourceMetadataUrl ?? "",
+      auth ? "insufficient_scope" : "invalid_token",
+    );
+  }
+
   if (!hasOAuthScope(auth?.scopes, OAUTH_SCOPES.WRITE)) {
     return authChallenge(
       "Sign in to perform write actions on WordPress.",

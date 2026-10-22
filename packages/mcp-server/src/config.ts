@@ -14,6 +14,7 @@ export interface Config {
   oauthTokenTtlSeconds: number;
   oauthRefreshTtlSeconds: number;
   oauthDataDir: string;
+  oauthApprovalSecret: string;
   oauthRateLimit: OAuthRateLimitConfig;
   trustProxy: boolean;
   port: number;
@@ -22,6 +23,7 @@ export interface Config {
   mcpEnabledTools: Set<string> | undefined;
   mcpProtocolVersionPolicy: ProtocolVersionPolicy;
   mcpObservabilityEnabled: boolean;
+  mcpAllowAnonymousRead: boolean;
   mcpMaxSessions: number;
   mcpSessionIdleMs: number;
   mcpJsonBodyLimit: string;
@@ -119,6 +121,13 @@ export function loadConfig(): Config {
     throw new Error("Missing required env: MCP_PUBLIC_URL (required for OAuth/Mixed auth)");
   }
 
+  const oauthApprovalSecret = process.env.MCP_OAUTH_APPROVAL_SECRET ?? "";
+  if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && oauthApprovalSecret.length < 12) {
+    throw new Error(
+      "Missing required env: MCP_OAUTH_APPROVAL_SECRET (at least 12 characters; the site owner enters it to approve each OAuth connection)",
+    );
+  }
+
   return {
     sites,
     mcpAuthSecret,
@@ -129,6 +138,7 @@ export function loadConfig(): Config {
     oauthTokenTtlSeconds: Number(process.env.OAUTH_TOKEN_TTL_SECONDS ?? 3600),
     oauthRefreshTtlSeconds: Number(process.env.OAUTH_REFRESH_TTL_SECONDS ?? 7_776_000),
     oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
+    oauthApprovalSecret,
     oauthRateLimit: parseOAuthRateLimit(),
     trustProxy: parseBoolean(process.env.MCP_TRUST_PROXY, true),
     port: Number(process.env.MCP_PORT ?? 3000),
@@ -137,6 +147,7 @@ export function loadConfig(): Config {
     mcpEnabledTools: parseEnabledTools(process.env.MCP_ENABLED_TOOLS),
     mcpProtocolVersionPolicy: parseProtocolVersionPolicy(process.env.MCP_PROTOCOL_VERSION_POLICY),
     mcpObservabilityEnabled: process.env.MCP_OBSERVABILITY_ENABLED !== "0",
+    mcpAllowAnonymousRead: parseBoolean(process.env.MCP_ALLOW_ANONYMOUS_READ, false),
     mcpMaxSessions: parsePositiveInt(process.env.MCP_MAX_SESSIONS, 100),
     mcpSessionIdleMs: parsePositiveInt(process.env.MCP_SESSION_IDLE_MS, 30 * 60 * 1000),
     // A sanity backstop against unbounded buffering, not a business rule — the

@@ -59,6 +59,7 @@ docker run -d \
   -e WORDPRESS_CONNECTION_TOKEN=... \
   -e MCP_PUBLIC_URL=https://mcp.example.com \
   -e MCP_AUTH_MODE=mixed \
+  -e MCP_OAUTH_APPROVAL_SECRET=change-me-long-random \
   wordpress-mcp:latest
 ```
 
@@ -70,6 +71,7 @@ docker run -d \
   -e 'WORDPRESS_SITES=[{"id":"blog-a","name":"Blog A","url":"https://a.example.com","token":"..."},{"id":"blog-b","name":"Blog B","url":"https://b.example.com","token":"..."}]' \
   -e MCP_PUBLIC_URL=https://mcp.example.com \
   -e MCP_AUTH_MODE=mixed \
+  -e MCP_OAUTH_APPROVAL_SECRET=change-me-long-random \
   wordpress-mcp:latest
 ```
 
@@ -87,6 +89,8 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_PUBLIC_URL` | Yes** | Public HTTPS URL of this MCP server (required for Mixed/OAuth) |
 | `MCP_AUTH_MODE` | No | `mixed` (default), `oauth`, `static`, or `none` |
 | `MCP_AUTH_SECRET` | Yes*** | Bearer token for MCP clients (only when `MCP_AUTH_MODE=static`) |
+| `MCP_OAUTH_APPROVAL_SECRET` | Yes** | Secret the site owner enters on the OAuth consent page (at least 12 characters) |
+| `MCP_ALLOW_ANONYMOUS_READ` | No | `false` (default). Mixed only: allow read tools without OAuth |
 | `MCP_AUTH_DISABLED` | No | Default `false`. Dev-only when ChatGPT uses No Auth |
 | `OAUTH_ISSUER_URL` | No | Defaults to `MCP_PUBLIC_URL` origin |
 | `OAUTH_TOKEN_TTL_SECONDS` | No | Default `3600` (access token; ChatGPT auto-refreshes) |

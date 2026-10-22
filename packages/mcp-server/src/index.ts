@@ -61,6 +61,7 @@ function getMcpServerOptions() {
     observability,
     protocolVersionPolicy: config.mcpProtocolVersionPolicy,
     activeSiteStore,
+    allowAnonymousRead: config.mcpAllowAnonymousRead,
   };
 }
 
@@ -110,11 +111,12 @@ async function handleMcpPost(req: Request, res: Response): Promise<void> {
       if (existing) {
         transport = existing as StreamableHTTPServerTransport;
       } else {
-        res.status(404).json({
-          jsonrpc: "2.0",
-          error: { code: -32001, message: "Session not found" },
-          id: null,
-        });
+        // The session was evicted (idle timeout, capacity) or the server
+        // restarted. Several connectors do not re-initialize on 404 and
+        // show the connection as broken until it is re-linked, so serve
+        // this request statelessly instead (JOOWM-3).
+        observability.recordEvent("mcp.session.recovered", { session_id: sessionId });
+        await handleStatelessRequest(req, res);
         return;
       }
     } else if (isInitializeRequest(req.body)) {
@@ -164,6 +166,25 @@ async function handleMcpPost(req: Request, res: Response): Promise<void> {
       });
     }
   }
+}
+
+async function handleStatelessRequest(req: Request, res: Response): Promise<void> {
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: true,
+  });
+  const server = getServer();
+  res.on("close", () => {
+    void transport.close();
+    void server.close();
+  });
+
+  await server.connect(transport);
+  // The stateless transport rejects a session header it did not issue.
+  delete req.headers["mcp-session-id"];
+  await runWithMcpSession(undefined, () =>
+    runWithAuth(req.auth, () => transport.handleRequest(req, res, req.body)),
+  );
 }
 
 function mcpAuthMiddleware(req: Request, res: Response, next: () => void): void {

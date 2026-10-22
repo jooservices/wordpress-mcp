@@ -68,11 +68,35 @@ services:
       MCP_AUTH_MODE: ${MCP_AUTH_MODE:-static}
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
       MCP_PUBLIC_URL: ${MCP_PUBLIC_URL:-http://localhost:3000}
+      MCP_OAUTH_APPROVAL_SECRET: ${MCP_OAUTH_APPROVAL_SECRET:-dev-approval-secret-local-only}
+      MCP_ALLOW_ANONYMOUS_READ: ${MCP_ALLOW_ANONYMOUS_READ:-false}
       MCP_PORT: 3000
       MCP_HOST: 0.0.0.0
     depends_on:
       wp-init:
         condition: service_completed_successfully
+
+  # Second MCP server in Mixed/OAuth mode against the same WordPress, used
+  # by the OAuth E2E (owner consent, scopes, anonymous challenge).
+  mcp-oauth:
+    build:
+      context: ./packages/mcp-server
+      dockerfile: Dockerfile
+    environment:
+      WORDPRESS_URL: http://wordpress
+      WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
+      MCP_AUTH_MODE: mixed
+      MCP_PUBLIC_URL: http://mcp-oauth:3000
+      MCP_OAUTH_APPROVAL_SECRET: ${MCP_OAUTH_APPROVAL_SECRET:-dev-approval-secret-local-only}
+      MCP_OAUTH_RATE_LIMIT_ENABLED: "0"
+      # Test-only: the compose hostname is plain HTTP. Never set in production.
+      MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL: "true"
+      MCP_PORT: 3000
+      MCP_HOST: 0.0.0.0
+    depends_on:
+      wp-init:
+        condition: service_completed_successfully
+    profiles: ["oauth"]
 
   php:
     build:
@@ -123,6 +147,8 @@ services:
       RUN_E2E: "1"
       RUN_E2E_FULL: ${RUN_E2E_FULL:-}
       MCP_URL: http://mcp:3000
+      MCP_OAUTH_URL: http://mcp-oauth:3000
+      MCP_OAUTH_APPROVAL_SECRET: ${MCP_OAUTH_APPROVAL_SECRET:-dev-approval-secret-local-only}
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
       WORDPRESS_SITE_ID: ${WORDPRESS_SITE_ID:-default}
       NODE_OPTIONS: --max-old-space-size=512
