@@ -25,4 +25,23 @@ describe("WordPressClient request timeout", () => {
     expect((error as WordPressApiError).code).toBe("WORDPRESS_TIMEOUT");
     expect((error as WordPressApiError).message).toMatch(/may still have completed/);
   });
+
+  it("reports WORDPRESS_TIMEOUT when the response body stalls after headers arrive", async () => {
+    process.env.WORDPRESS_REQUEST_TIMEOUT_MS = "20";
+    vi.stubGlobal("fetch", (_url: string, init: RequestInit) => {
+      const body = new ReadableStream({
+        start(controller) {
+          init.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+        },
+      });
+
+      return Promise.resolve(new Response(body, { status: 200 }));
+    });
+
+    const client = new WordPressClient({ url: "https://example.test", token: "t" } as never);
+    const error = await client.post("/media", {}).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(WordPressApiError);
+    expect((error as WordPressApiError).code).toBe("WORDPRESS_TIMEOUT");
+  });
 });

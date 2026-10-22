@@ -54,7 +54,7 @@ final class UserService
 
         $role = sanitize_key((string) ($data['role'] ?? 'subscriber'));
 
-        if (! isset(wp_roles()->roles[$role])) {
+        if (! $this->canAssignRole($role)) {
             return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
 
@@ -83,6 +83,16 @@ final class UserService
             return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
         }
 
+        $role = null;
+
+        if (isset($data['role'])) {
+            $role = sanitize_key((string) $data['role']);
+
+            if (! $this->canAssignRole($role)) {
+                return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
+            }
+        }
+
         $update = ['ID' => $id];
 
         foreach (['display_name', 'user_email', 'user_url', 'description', 'first_name', 'last_name'] as $field) {
@@ -107,13 +117,7 @@ final class UserService
             return ['user' => null, 'error' => ErrorCodes::WORDPRESS_ERROR];
         }
 
-        if (isset($data['role'])) {
-            $role = sanitize_key((string) $data['role']);
-
-            if (! isset(wp_roles()->roles[$role])) {
-                return ['user' => null, 'error' => ErrorCodes::INVALID_ARGUMENT];
-            }
-
+        if ($role !== null) {
             $user = new WP_User($id);
             $user->set_role($role);
         }
@@ -163,5 +167,15 @@ final class UserService
             'roles' => array_values($user->roles),
             'registered_at' => $user->user_registered,
         ];
+    }
+
+    private function canAssignRole(string $role): bool
+    {
+        if (! function_exists('get_editable_roles')) {
+            /** @phpstan-ignore-next-line WordPress loads this admin helper on demand. */
+            require_once ABSPATH . 'wp-admin/includes/user.php';
+        }
+
+        return isset(get_editable_roles()[$role]);
     }
 }

@@ -38,6 +38,7 @@ const publishedContent = {
   status: "publish",
 };
 
+let uploadResponse: Record<string, unknown> = { id: 1, verification: { passed: true } };
 let robotsContent = "User-agent: *\nDisallow:\n";
 const plugins = [
   { plugin: "akismet/akismet.php", name: "Akismet", version: "5.3", active: true, update_available: false, internal_secret: "no" },
@@ -142,6 +143,10 @@ function fetchRouter(input: string, init?: { method?: string; body?: string }) {
       status: "hold",
       created_at: "2026-01-01T00:00:00",
     }, 201);
+  }
+
+  if (rel === "/media" && method === "POST") {
+    return json(uploadResponse);
   }
 
   if (rel === "/media" && method === "GET") {
@@ -1018,6 +1023,45 @@ describe("comment and taxonomy tools", () => {
     expect(deleted.isError).toBeUndefined();
     expect(deleted.structuredContent).toMatchObject({ site: "abc", deleted: true });
     expect(ctx.calls.some((call) => call.url.includes("/terms/3?taxonomy=category"))).toBe(true);
+  });
+});
+
+describe("wordpress_upload_media partial success", () => {
+  const uploadArgs = { site: "abc", title: "Cat", image_type: "featured", content_base64: "AAAA" };
+
+  it("reports replay, featured and public URL warnings in the returned text", async () => {
+    uploadResponse = {
+      id: 55,
+      idempotent_replay: true,
+      verification: {
+        passed: true,
+        featured_set: false,
+        featured_error: "boom",
+        featured_step: "featured.set_failed",
+        public_url_warning: "timeout",
+      },
+    };
+
+    const result = await ctx.client.callTool({
+      name: "wordpress_upload_media",
+      arguments: { ...uploadArgs, post_id: 42, set_featured: true },
+    });
+
+    const text = (result.content as Array<{ text: string }>)[0].text;
+    expect(result.isError).toBeFalsy();
+    expect(text).toContain('Uploaded verified media #55 on site "abc".');
+    expect(text).toContain("Partial success:");
+    expect(text).toContain("already uploaded for this post");
+    expect(text).toContain("featured image was NOT set (featured.set_failed)");
+    expect(text).toContain("public URL check was inconclusive (timeout)");
+  });
+
+  it("returns the plain message when there is nothing to warn about", async () => {
+    uploadResponse = { id: 56, verification: { passed: true } };
+
+    const result = await ctx.client.callTool({ name: "wordpress_upload_media", arguments: uploadArgs });
+
+    expect((result.content as Array<{ text: string }>)[0].text).toBe('Uploaded verified media #56 on site "abc".');
   });
 });
 

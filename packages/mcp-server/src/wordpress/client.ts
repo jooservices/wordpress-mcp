@@ -60,6 +60,7 @@ export class WordPressClient {
 
     const timeoutMs = requestTimeoutMs();
     let response: Response;
+    let text: string;
 
     try {
       response = await fetch(url, {
@@ -73,6 +74,7 @@ export class WordPressClient {
         },
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
+      text = await response.text();
     } catch (error) {
       if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
         throw new WordPressApiError(
@@ -85,7 +87,6 @@ export class WordPressClient {
       throw error;
     }
 
-    const text = await response.text();
     let parsed: unknown = {};
 
     if (text !== "") {

@@ -129,6 +129,51 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_rejects_an_overlapping_retry_while_the_upload_key_is_reserved(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $GLOBALS['wp_test_options'][$lockName] = (string) time();
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'racing.png',
+            'content_base64' => base64_encode($png),
+            'post_id' => 70,
+        ]);
+
+        self::assertNull($result['media']);
+        self::assertSame('upload.in_progress', $result['error_step']);
+        self::assertCount(0, $GLOBALS['wp_test_posts'], 'An overlapping retry must not create an attachment.');
+        self::assertArrayHasKey($lockName, $GLOBALS['wp_test_options'], 'The holder keeps its lock.');
+    }
+
+    #[Test]
+    public function it_takes_over_a_stale_upload_lock_and_releases_it_afterwards(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $GLOBALS['wp_test_options'][$lockName] = (string) (time() - 3600);
+
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'stale.png',
+            'content_base64' => base64_encode($png),
+        ]);
+
+        self::assertSame('upload.sideload', $result['error_step']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'A stale lock must not block the upload.');
+        self::assertArrayNotHasKey($lockName, $GLOBALS['wp_test_options']);
+    }
+
+    #[Test]
     public function it_keeps_the_media_and_reports_when_setting_the_featured_image_fails(): void
     {
         $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';

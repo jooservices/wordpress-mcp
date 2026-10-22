@@ -27,6 +27,11 @@ final class MediaService
 
     private const UPLOAD_POST_META_KEY = '_mcp_media_upload_post_id';
 
+    /** Option-row lock reserving an upload key while it is being stored. */
+    private const UPLOAD_LOCK_OPTION_PREFIX = 'jooservices_mcp_upload_lock_';
+
+    private const UPLOAD_LOCK_TTL_SECONDS = 300;
+
     /** @var list<string> */
     private const BLOCKED_EXTENSIONS = [
         'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
@@ -151,6 +156,44 @@ final class MediaService
             return $this->replayUpload($existingId, $data);
         }
 
+        // Lookup + sideload are not atomic on their own: reserve the key first
+        // so an overlapping retry cannot also miss it and create a duplicate.
+        $lockName = self::UPLOAD_LOCK_OPTION_PREFIX . substr(hash('sha256', $preCheck['sha256'] . ':' . $targetPostId), 0, 40);
+
+        if (! $this->acquireUploadLock($lockName)) {
+            $waitMs = max(0, (int) apply_filters('jooservices_mcp_upload_lock_wait_ms', 3000));
+            $existingId = $this->waitForUploadKey($preCheck['sha256'], $targetPostId, $waitMs);
+
+            if ($existingId !== null) {
+                return $this->replayUpload($existingId, $data);
+            }
+
+            return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.in_progress');
+        }
+
+        try {
+            // Re-check under the lock: a concurrent request may have finished
+            // between the first lookup and acquiring the lock.
+            $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
+
+            if ($existingId !== null) {
+                return $this->replayUpload($existingId, $data);
+            }
+
+            return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, $targetPostId);
+        } finally {
+            delete_option($lockName);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $naming
+     * @param array<string, mixed> $preCheck
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function storeUpload(array $data, array $naming, array $preCheck, string $content, string $fileName, int $targetPostId): array
+    {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -720,6 +763,49 @@ final class MediaService
             'error' => null,
             'error_step' => null,
         ];
+    }
+
+    /**
+     * Atomic reservation: `add_option()` fails when the option row already
+     * exists (unique option_name), so only one request holds a given key. A
+     * lock older than the TTL is treated as left by a crashed request.
+     */
+    private function acquireUploadLock(string $lockName): bool
+    {
+        if (add_option($lockName, (string) time(), '', false)) {
+            return true;
+        }
+
+        $heldSince = (int) get_option($lockName, 0);
+
+        if ($heldSince > 0 && time() - $heldSince < self::UPLOAD_LOCK_TTL_SECONDS) {
+            return false;
+        }
+
+        delete_option($lockName);
+
+        return (bool) add_option($lockName, (string) time(), '', false);
+    }
+
+    private function waitForUploadKey(string $sha256, int $postId, int $waitMs): ?int
+    {
+        $deadline = microtime(true) + $waitMs / 1000;
+
+        do {
+            $existingId = $this->findAttachmentByUploadKey($sha256, $postId);
+
+            if ($existingId !== null) {
+                return $existingId;
+            }
+
+            if ($waitMs <= 0) {
+                break;
+            }
+
+            usleep(250_000);
+        } while (microtime(true) < $deadline);
+
+        return null;
     }
 
     private function findAttachmentByUploadKey(string $sha256, int $postId): ?int

@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Media upload: the public-URL loopback check is advisory (default timeout 5 s, filter `jooservices_mcp_public_url_timeout`) and never deletes a stored file; a featured-image failure keeps the media and is reported as `featured_error`/`featured_step`; uploads are idempotent per sha256 + `post_id` (`idempotent_replay`); the MCP client times out with a clear `WORDPRESS_TIMEOUT` error (`WORDPRESS_REQUEST_TIMEOUT_MS`, default 120 s) and reports partial success.
 
+### Fixed
+
+- OAuth refresh rotation now has a grace window (`OAUTH_REFRESH_GRACE_SECONDS`, default 120): a retried or concurrent refresh with the old token gets the same new tokens instead of `invalid_grant`.
+- MCP sessions lost to a restart or idle eviction are recreated transparently for session ids this server issued, instead of returning 404 and forcing a client re-link.
+- The OAuth file store no longer re-reads the JSON on every call, and prunes idle registered clients (`OAUTH_CLIENT_RETENTION_DAYS`, default 7) and caps the client count.
+
 ## [1.5.0] - 2026-10-13
 
 ### Added
