@@ -2657,8 +2657,12 @@ final class RestRegistrar
         }
 
         $postId = (int) ($payload['post_id'] ?? 0);
+        $post = $postId > 0 ? get_post($postId) : null;
+        if (! ($post instanceof \WP_Post)) {
+            return true;
+        }
 
-        return $postId <= 0 || user_can($connection->userId, 'edit_post', $postId);
+        return user_can($connection->userId, 'edit_post', $postId);
     }
 
     /**
