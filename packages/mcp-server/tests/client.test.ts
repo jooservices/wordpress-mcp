@@ -44,4 +44,29 @@ describe("WordPressClient request timeout", () => {
     expect(error).toBeInstanceOf(WordPressApiError);
     expect((error as WordPressApiError).code).toBe("WORDPRESS_TIMEOUT");
   });
+
+  it("preserves a retryable media upload conflict from WordPress", async () => {
+    vi.stubGlobal(
+      "fetch",
+      () =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              code: "MEDIA_UPLOAD_IN_PROGRESS",
+              message: "An upload with these file contents and post is already in progress. Retry the upload shortly.",
+              data: { status: 409, verification_step: "upload.in_progress" },
+            }),
+            { status: 409, headers: { "content-type": "application/json" } },
+          ),
+        ),
+    );
+
+    const client = new WordPressClient({ url: "https://example.test", token: "t" } as never);
+    const error = await client.post("/media", {}).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(WordPressApiError);
+    expect((error as WordPressApiError).code).toBe("MEDIA_UPLOAD_IN_PROGRESS");
+    expect((error as WordPressApiError).status).toBe(409);
+    expect((error as WordPressApiError).message).toMatch(/Retry the upload shortly/);
+  });
 });

@@ -129,6 +129,44 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_rejects_replay_when_the_stored_file_no_longer_matches_the_upload_key(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $chunkData = 'changed';
+        $chunk = pack('N', strlen($chunkData)) . 'tEXt' . $chunkData . pack('N', crc32('tEXt' . $chunkData));
+        $changedPng = substr($png, 0, -12) . $chunk . substr($png, -12);
+        $path = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/replay-mutated-' . uniqid() . '.png';
+        $this->writeMinimalPng($path);
+        file_put_contents($path, $changedPng);
+
+        $GLOBALS['wp_test_posts'][9100] = new \WP_Post(9100, '', 'attachment');
+        $GLOBALS['wp_test_posts'][9100]->post_status = 'inherit';
+        $GLOBALS['wp_test_attachment_files'][9100] = $path;
+        $GLOBALS['wp_test_attachment_urls'][9100] = 'https://example.test/wp-content/uploads/replay-mutated.png';
+        $GLOBALS['wp_test_attachment_mimes'][9100] = 'image/png';
+        $GLOBALS['wp_test_attachment_metadata'][9100] = ['width' => 1, 'height' => 1, 'sizes' => []];
+        $GLOBALS['wp_test_postmeta'][9100] = [
+            '_mcp_media_upload_sha256' => hash('sha256', $png),
+            '_mcp_media_upload_post_id' => '70',
+        ];
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'replay.png',
+            'content_base64' => base64_encode($png),
+            'post_id' => 70,
+        ]);
+
+        self::assertSame(ErrorCodes::MEDIA_VERIFY_FAILED, $result['error']);
+        self::assertSame('post_validate.sha256_mismatch', $result['error_step']);
+        self::assertFalse($result['verification']['sha256_match']);
+        self::assertNull($result['media']);
+        self::assertArrayHasKey(9100, $GLOBALS['wp_test_posts'], 'A replay checksum mismatch must not delete the stored attachment.');
+
+        unlink($path);
+    }
+
+    #[Test]
     public function it_rejects_an_overlapping_retry_while_the_upload_key_is_reserved(): void
     {
         $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
@@ -146,6 +184,7 @@ final class MediaServiceTest extends TestCase
         ]);
 
         self::assertNull($result['media']);
+        self::assertSame(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, $result['error']);
         self::assertSame('upload.in_progress', $result['error_step']);
         self::assertCount(0, $GLOBALS['wp_test_posts'], 'An overlapping retry must not create an attachment.');
         self::assertArrayHasKey($lockName, $GLOBALS['wp_test_options'], 'The holder keeps its lock.');
@@ -195,6 +234,7 @@ final class MediaServiceTest extends TestCase
             unset($GLOBALS['wp_test_sideload_hook']);
         }
 
+        self::assertSame(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, $retry['error']);
         self::assertSame('upload.in_progress', $retry['error_step']);
         self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Only one sideload may run.');
     }

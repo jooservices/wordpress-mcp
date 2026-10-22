@@ -1689,12 +1689,15 @@ final class RestRegistrar
             $status = match ($result['error']) {
                 ErrorCodes::INVALID_ARGUMENT, ErrorCodes::MEDIA_VERIFY_FAILED => 400,
                 ErrorCodes::MEDIA_UPLOAD_LIMIT_EXCEEDED => 413,
+                ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS => 409,
                 ErrorCodes::POST_NOT_FOUND => 404,
                 default => 403,
             };
             $err = ErrorCodes::error(
                 $result['error'],
-                'Failed to upload media.',
+                $result['error'] === ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS
+                    ? 'An upload with these file contents and post is already in progress. Retry the upload shortly.'
+                    : 'Failed to upload media.',
                 $status,
                 array_filter([
                     'verification_step' => $result['error_step'],

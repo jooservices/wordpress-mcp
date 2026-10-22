@@ -153,7 +153,7 @@ final class MediaService
         $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
 
         if ($existingId !== null) {
-            return $this->replayUpload($existingId, $data);
+            return $this->replayUpload($existingId, $data, $preCheck['sha256']);
         }
 
         // Lookup + sideload are not atomic on their own: reserve the key first
@@ -167,10 +167,10 @@ final class MediaService
             $existingId = $this->waitForUploadKey($preCheck['sha256'], $targetPostId, $waitMs);
 
             if ($existingId !== null) {
-                return $this->replayUpload($existingId, $data);
+                return $this->replayUpload($existingId, $data, $preCheck['sha256']);
             }
 
-            return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.in_progress');
+            return $this->uploadFailure(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, 'upload.in_progress');
         }
 
         try {
@@ -179,7 +179,7 @@ final class MediaService
             $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
 
             if ($existingId !== null) {
-                return $this->replayUpload($existingId, $data);
+                return $this->replayUpload($existingId, $data, $preCheck['sha256']);
             }
 
             return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, $targetPostId, $lockName, $lockToken);
@@ -755,9 +755,9 @@ final class MediaService
      * @param array<string, mixed> $data
      * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
      */
-    private function replayUpload(int $attachmentId, array $data): array
+    private function replayUpload(int $attachmentId, array $data, string $sourceSha256): array
     {
-        $stored = MediaStoredVerifier::verifyAttachment($attachmentId);
+        $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $sourceSha256);
 
         if ($stored['step'] !== null) {
             return $this->uploadFailure(ErrorCodes::MEDIA_VERIFY_FAILED, $stored['step'], $stored['verification']);
