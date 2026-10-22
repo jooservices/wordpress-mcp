@@ -1437,7 +1437,7 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       name: "wordpress_upload_media",
       title: "Upload WordPress media",
       description:
-        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256), verifies stored file, metadata, subsizes, and public URL before returning. Use attachment ID only when verification.passed is true. Call wordpress_get_site for upload limits. Optionally set featured image with post_id + set_featured after verification passes.",
+        "Upload PNG/JPEG/WebP from base64. WordPress checks PHP limits, validates bytes (MIME, decode, SHA256), verifies stored file, metadata, subsizes, and public URL before returning. Use attachment ID only when verification.passed is true. The public URL check is advisory (verification.public_url_warning). Idempotent: re-uploading the same bytes for the same post_id returns the existing attachment (idempotent_replay: true) instead of creating a duplicate, so retrying after a timeout is safe. If setting the featured image fails the media is kept and verification.featured_set is false with featured_error/featured_step. Call wordpress_get_site for upload limits. Optionally set featured image with post_id + set_featured after verification passes.",
       inputSchema: uploadMediaSchema,
       access: "write",
       dto: { kind: "media" },
@@ -1446,13 +1446,24 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const item = await client.post<MediaDto>("/media", wpArgs(args));
       const verification = item.verification;
       const passed = verification?.passed === true;
+      const warnings: string[] = [];
+      if (item.idempotent_replay === true) {
+        warnings.push("this file was already uploaded for this post, so the existing attachment was returned (no duplicate created)");
+      }
+      if (verification?.featured_error) {
+        warnings.push(`the media was stored but the featured image was NOT set (${verification.featured_step ?? verification.featured_error}); set it with wordpress_update_content instead of re-uploading`);
+      }
+      if (verification?.public_url_warning) {
+        warnings.push(`the public URL check was inconclusive (${verification.public_url_warning}); the stored file itself is verified`);
+      }
+      const base = passed
+        ? `Uploaded verified media #${item.id} on site "${siteId}".`
+        : `Uploaded media #${item.id} on site "${siteId}", but verification did not pass.`;
       return {
         content: [
           {
             type: "text",
-            text: passed
-              ? `Uploaded verified media #${item.id} on site "${siteId}".`
-              : `Uploaded media #${item.id} on site "${siteId}", but verification did not pass.`,
+            text: warnings.length > 0 ? `${base} Partial success: ${warnings.join("; ")}.` : base,
           },
         ],
         structuredContent: withSiteMeta(siteId, item),

@@ -89,6 +89,80 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_returns_the_existing_attachment_when_the_same_file_is_uploaded_again_for_the_same_post(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $path = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/replay-' . uniqid() . '.png';
+        $this->writeMinimalPng($path);
+
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $GLOBALS['wp_test_posts'] = [
+            70 => new \WP_Post(70, '', 'post'),
+            9100 => new \WP_Post(9100, '', 'attachment'),
+        ];
+        $GLOBALS['wp_test_posts'][9100]->post_status = 'inherit';
+        $GLOBALS['wp_test_attachment_files'][9100] = $path;
+        $GLOBALS['wp_test_attachment_urls'][9100] = 'https://example.test/wp-content/uploads/replay.png';
+        $GLOBALS['wp_test_attachment_mimes'][9100] = 'image/png';
+        $GLOBALS['wp_test_attachment_metadata'][9100] = ['width' => 1, 'height' => 1, 'sizes' => []];
+        $GLOBALS['wp_test_postmeta'][9100] = [
+            '_mcp_media_upload_sha256' => hash('sha256', $png),
+            '_mcp_media_upload_post_id' => '70',
+        ];
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'replay.png',
+            'content_base64' => base64_encode($png),
+            'post_id' => 70,
+            'set_featured' => true,
+        ]);
+
+        self::assertNull($result['error']);
+        self::assertSame(9100, $result['media']['id']);
+        self::assertTrue($result['media']['idempotent_replay']);
+        self::assertTrue($result['verification']['featured_set']);
+        self::assertSame(9100, $GLOBALS['wp_test_thumbnails'][70]);
+        self::assertCount(2, $GLOBALS['wp_test_posts'], 'A retry must not create a duplicate attachment.');
+
+        unlink($path);
+    }
+
+    #[Test]
+    public function it_keeps_the_media_and_reports_when_setting_the_featured_image_fails(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/01/featured-' . uniqid() . '.png';
+        $this->writeMinimalPng($basedir . '/' . $relative);
+
+        $GLOBALS['wp_test_posts'][70] = new \WP_Post(70, '', 'post');
+        $GLOBALS['wp_test_set_thumbnail_fails'] = true;
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        try {
+            $result = (new MediaService())->adoptOrphan([
+                'path' => $relative,
+                'post_id' => 70,
+                'set_featured' => true,
+            ]);
+        } finally {
+            unset($GLOBALS['wp_test_set_thumbnail_fails']);
+        }
+
+        self::assertNull($result['error']);
+        self::assertNotNull($result['media']);
+        self::assertTrue($result['verification']['passed']);
+        self::assertFalse($result['verification']['featured_set']);
+        self::assertSame(ErrorCodes::WORDPRESS_ERROR, $result['verification']['featured_error']);
+        self::assertSame('featured.set_failed', $result['verification']['featured_step']);
+        self::assertArrayHasKey((int) $result['media']['id'], $GLOBALS['wp_test_posts']);
+    }
+
+    #[Test]
     public function it_rejects_adopt_without_path_or_url(): void
     {
         $service = new MediaService();

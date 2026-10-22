@@ -72,6 +72,36 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     expect(String(step ?? textOf(result))).toMatch(/pre_validate\./);
   });
 
+  it("returns the existing attachment when the same upload is retried for the same post", async () => {
+    const post = await session.expectSuccess("wordpress_create_content", {
+      type: "post",
+      title: `E2E idempotent ${stamp}`,
+      content: "<p>idempotent</p>",
+      status: "draft",
+    });
+    const postId = Number(post.structuredContent?.id);
+    const args = {
+      title: `E2E idempotent ${stamp}`,
+      image_type: "inline",
+      content_base64: fixtureBase64("e2e-small.png"),
+      post_id: postId,
+      set_featured: true,
+    };
+
+    try {
+      const first = await session.expectSuccess("wordpress_upload_media", args);
+      const firstId = Number(first.structuredContent?.id);
+      createdIds.push(firstId);
+
+      const retry = await session.expectSuccess("wordpress_upload_media", args);
+      expect(Number(retry.structuredContent?.id)).toBe(firstId);
+      expect(retry.structuredContent?.idempotent_replay).toBe(true);
+      expect((retry.structuredContent?.verification as { featured_set?: boolean } | undefined)?.featured_set).toBe(true);
+    } finally {
+      await session.call("wordpress_delete_content", { id: postId, force: true, confirm: true });
+    }
+  });
+
   it("records empty-sizes behavior for a 1x1 PNG", async () => {
     const result = await session.call("wordpress_upload_media", {
       title: `E2E tiny ${stamp}`,

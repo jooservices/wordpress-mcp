@@ -27,7 +27,10 @@ final class MediaVerificationResult
             'metadata_generated' => false,
             'public_url_ok' => null,
             'public_url_status' => null,
+            'public_url_warning' => null,
             'featured_set' => false,
+            'featured_error' => null,
+            'featured_step' => null,
             'failed_step' => null,
             'metadata_mismatch' => null,
         ];

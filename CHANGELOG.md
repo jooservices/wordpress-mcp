@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Media upload: the public-URL loopback check is advisory (default timeout 5 s, filter `jooservices_mcp_public_url_timeout`) and never deletes a stored file; a featured-image failure keeps the media and is reported as `featured_error`/`featured_step`; uploads are idempotent per sha256 + `post_id` (`idempotent_replay`); the MCP client times out with a clear `WORDPRESS_TIMEOUT` error (`WORDPRESS_REQUEST_TIMEOUT_MS`, default 120 s) and reports partial success.
+
 ## [1.5.0] - 2026-10-13
 
 ### Added

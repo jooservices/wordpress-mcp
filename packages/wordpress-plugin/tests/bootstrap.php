@@ -757,6 +757,26 @@ if (! function_exists('wp_delete_term')) {
     }
 }
 
+if (! function_exists('set_post_thumbnail')) {
+    function set_post_thumbnail(int $postId, int $thumbnailId): bool
+    {
+        if ($GLOBALS['wp_test_set_thumbnail_fails'] ?? false) {
+            return false;
+        }
+
+        $GLOBALS['wp_test_thumbnails'][$postId] = $thumbnailId;
+
+        return true;
+    }
+}
+
+if (! function_exists('wp_attachment_is_image')) {
+    function wp_attachment_is_image(int $attachmentId): bool
+    {
+        return str_starts_with((string) get_post_mime_type($attachmentId), 'image/');
+    }
+}
+
 if (! function_exists('get_post_thumbnail_id')) {
     function get_post_thumbnail_id(int|\WP_Post $post): int
     {

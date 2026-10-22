@@ -22,6 +22,11 @@ final class MediaService
      */
     private const SOURCE_PATH_META_KEY = '_jooservices_orphan_source_path';
 
+    /** Upload idempotency key: sha256 of the uploaded bytes + target post ID. */
+    private const UPLOAD_SHA256_META_KEY = '_mcp_media_upload_sha256';
+
+    private const UPLOAD_POST_META_KEY = '_mcp_media_upload_post_id';
+
     /** @var list<string> */
     private const BLOCKED_EXTENSIONS = [
         'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
@@ -139,6 +144,13 @@ final class MediaService
             return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.extension');
         }
 
+        $targetPostId = max(0, (int) ($data['post_id'] ?? 0));
+        $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
+
+        if ($existingId !== null) {
+            return $this->replayUpload($existingId, $data);
+        }
+
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -177,21 +189,10 @@ final class MediaService
             );
         }
 
-        $verification = $stored['verification'];
-        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
+        update_post_meta($attachmentId, self::UPLOAD_SHA256_META_KEY, $preCheck['sha256']);
+        update_post_meta($attachmentId, self::UPLOAD_POST_META_KEY, (string) $targetPostId);
 
-        if ($featuredSet['error'] !== null) {
-            $this->cleanupAttachment($attachmentId);
-
-            return $this->uploadFailure(
-                $featuredSet['error'],
-                $featuredSet['step'] ?? 'featured.set_failed',
-                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
-            );
-        }
-
-        $verification['featured_set'] = $featuredSet['set'];
-        $verification['passed'] = true;
+        $verification = $this->applyFeaturedResult($attachmentId, $data, $stored['verification']);
         MediaStoredVerifier::markVerified($attachmentId);
 
         $media = $this->normalize($attachmentId);
@@ -399,22 +400,7 @@ final class MediaService
             $verification['metadata_mismatch'] = $metadataCheck['verification']['metadata_mismatch'] ?? null;
         }
 
-        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
-
-        if ($featuredSet['error'] !== null) {
-            if ($isNewAdoption) {
-                $this->detachFailedAdoption($attachmentId);
-            }
-
-            return $this->uploadFailure(
-                $featuredSet['error'],
-                $featuredSet['step'] ?? 'featured.set_failed',
-                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
-            );
-        }
-
-        $verification['featured_set'] = $featuredSet['set'];
-        $verification['passed'] = true;
+        $verification = $this->applyFeaturedResult($attachmentId, $data, $verification);
         MediaStoredVerifier::markVerified($attachmentId);
         (new MediaOrphanScanner())->forgetOrphanFile($relativePath);
 
@@ -682,6 +668,77 @@ final class MediaService
         }
 
         return ['set' => true, 'error' => null, 'step' => null];
+    }
+
+    /**
+     * Setting the featured image is a follow-up step: a failure keeps the
+     * stored media and is reported in the verification instead of deleting it.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $verification
+     * @return array<string, mixed>
+     */
+    private function applyFeaturedResult(int $attachmentId, array $data, array $verification): array
+    {
+        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
+
+        $verification['featured_set'] = $featuredSet['set'];
+        $verification['featured_error'] = $featuredSet['error'];
+        $verification['featured_step'] = $featuredSet['step'];
+        $verification['passed'] = true;
+        $verification['failed_step'] = null;
+
+        return $verification;
+    }
+
+    /**
+     * Retry of an upload that already stored this exact file for this post:
+     * returns the existing attachment instead of creating a duplicate, and
+     * re-applies the featured image the first attempt may not have reached.
+     *
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function replayUpload(int $attachmentId, array $data): array
+    {
+        $stored = MediaStoredVerifier::verifyAttachment($attachmentId);
+
+        if ($stored['step'] !== null) {
+            return $this->uploadFailure(ErrorCodes::MEDIA_VERIFY_FAILED, $stored['step'], $stored['verification']);
+        }
+
+        $verification = $this->applyFeaturedResult($attachmentId, $data, $stored['verification']);
+        MediaStoredVerifier::markVerified($attachmentId);
+
+        $media = $this->normalize($attachmentId);
+        $media['verification'] = $verification;
+        $media['idempotent_replay'] = true;
+
+        return [
+            'media' => $media,
+            'verification' => $verification,
+            'error' => null,
+            'error_step' => null,
+        ];
+    }
+
+    private function findAttachmentByUploadKey(string $sha256, int $postId): ?int
+    {
+        $query = new WP_Query([
+            'post_type' => 'attachment',
+            'post_status' => 'inherit',
+            'posts_per_page' => 1,
+            'orderby' => 'ID',
+            'order' => 'ASC',
+            'meta_query' => [
+                ['key' => self::UPLOAD_SHA256_META_KEY, 'value' => $sha256],
+                ['key' => self::UPLOAD_POST_META_KEY, 'value' => (string) $postId],
+            ],
+        ]);
+
+        $post = $query->posts[0] ?? null;
+
+        return $post instanceof \WP_Post ? (int) $post->ID : null;
     }
 
     private function cleanupAttachment(int $attachmentId): void

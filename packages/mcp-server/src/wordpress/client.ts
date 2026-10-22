@@ -2,6 +2,14 @@ import { normalizeWordPressError, WordPressApiError } from "../errors/normalize.
 import { getRequestId } from "../mcp/requestContext.js";
 import type { WordPressSiteCredentials } from "./types.js";
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
+
+function requestTimeoutMs(): number {
+  const parsed = Number.parseInt(process.env.WORDPRESS_REQUEST_TIMEOUT_MS ?? "", 10);
+
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_REQUEST_TIMEOUT_MS;
+}
+
 export class WordPressClient {
   private readonly baseUrl: string;
   private readonly token: string;
@@ -50,16 +58,32 @@ export class WordPressClient {
   private async request<T>(method: string, url: string, body?: unknown): Promise<T> {
     const requestId = getRequestId();
 
-    const response = await fetch(url, {
-      method,
-      headers: {
-        Authorization: `Bearer ${this.token}`,
-        Accept: "application/json",
-        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-        ...(requestId ? { "X-Request-Id": requestId } : {}),
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
+    const timeoutMs = requestTimeoutMs();
+    let response: Response;
+
+    try {
+      response = await fetch(url, {
+        signal: AbortSignal.timeout(timeoutMs),
+        method,
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          Accept: "application/json",
+          ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+          ...(requestId ? { "X-Request-Id": requestId } : {}),
+        },
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+    } catch (error) {
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        throw new WordPressApiError(
+          "WORDPRESS_TIMEOUT",
+          `WordPress did not respond within ${timeoutMs} ms. The operation may still have completed on the site; check before retrying (media uploads are idempotent per file and post).`,
+          504,
+        );
+      }
+
+      throw error;
+    }
 
     const text = await response.text();
     let parsed: unknown = {};
