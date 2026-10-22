@@ -91,6 +91,8 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `OAUTH_ISSUER_URL` | No | Defaults to `MCP_PUBLIC_URL` origin |
 | `OAUTH_TOKEN_TTL_SECONDS` | No | Default `3600` (access token; ChatGPT auto-refreshes) |
 | `OAUTH_REFRESH_TTL_SECONDS` | No | Default `7776000` (90 days) |
+| `OAUTH_REFRESH_GRACE_SECONDS` | No | Default `120`. A rotated refresh token keeps returning the same new tokens for this long, so retried or concurrent refreshes do not fail with `invalid_grant` |
+| `OAUTH_CLIENT_RETENTION_DAYS` | No | Default `7`. Registered OAuth clients with no live token or code are pruned after this age |
 | `OAUTH_DATA_DIR` | No | Default `/app/data/oauth` — mount a volume in production |
 | `MCP_PORT` | No | Default `3000` |
 | `MCP_HOST` | No | Default `0.0.0.0` |

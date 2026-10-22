@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- OAuth refresh rotation now has a grace window (`OAUTH_REFRESH_GRACE_SECONDS`, default 120): a retried or concurrent refresh with the old token gets the same new tokens instead of `invalid_grant`.
+- MCP sessions lost to a restart or idle eviction are recreated transparently for session ids this server issued, instead of returning 404 and forcing a client re-link.
+- The OAuth file store no longer re-reads the JSON on every call, and prunes idle registered clients (`OAUTH_CLIENT_RETENTION_DAYS`, default 7) and caps the client count.
+
 ## [1.5.0] - 2026-10-13
 
 ### Added
