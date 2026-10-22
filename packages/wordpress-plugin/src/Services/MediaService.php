@@ -794,19 +794,41 @@ final class MediaService
             return $token;
         }
 
-        if (time() < $this->lockExpiry((string) get_option($lockName, ''))) {
+        $staleValue = (string) get_option($lockName, '');
+
+        if (time() < $this->lockExpiry($staleValue)) {
             return null;
         }
 
-        delete_option($lockName);
-
-        return $this->reserveUploadLock($lockName, $token) ? $token : null;
+        return $this->claimStaleUploadLock($lockName, $staleValue, $token) ? $token : null;
     }
 
     /** @phpstan-impure */
     private function reserveUploadLock(string $lockName, string $token): bool
     {
         return add_option($lockName, $this->lockValue($token), '', false);
+    }
+
+    /**
+     * Replaces an expired option only if it still contains the value this
+     * request observed. This compare-and-swap prevents concurrent retries
+     * from deleting a lock another retry has already claimed.
+     */
+    private function claimStaleUploadLock(string $lockName, string $staleValue, string $token): bool
+    {
+        global $wpdb;
+
+        $claimed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+            $this->lockValue($token),
+            $lockName,
+            $staleValue,
+        ));
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+
+        return $claimed === 1;
     }
 
     /** Extends the lease, but only while this request still owns the lock. */

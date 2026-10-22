@@ -123,6 +123,60 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     }
   });
 
+  it("keeps an upload retrievable and reports featured_error when its post was deleted", async () => {
+    let deletedPostId = 0;
+    let postWasDeleted = false;
+
+    try {
+      const post = await session.expectSuccess("wordpress_create_content", {
+        type: "post",
+        title: `E2E deleted featured target ${stamp}`,
+        content: "The target will be deleted before setting the featured image.",
+        status: "draft",
+      });
+      deletedPostId = Number(post.structuredContent?.id);
+      expect(deletedPostId).toBeGreaterThan(0);
+
+      const deleted = await session.expectSuccess("wordpress_delete_content", {
+        id: deletedPostId,
+        force: true,
+        confirm: true,
+      });
+      postWasDeleted = true;
+      expect(deleted.isError ?? false).toBe(false);
+
+      const uploaded = await session.call("wordpress_upload_media", {
+        title: `E2E retained after featured failure ${stamp}`,
+        image_type: "inline",
+        content_base64: fixtureBase64("e2e-small.png"),
+        post_id: deletedPostId,
+        set_featured: true,
+      });
+
+      expect(uploaded.isError ?? false, `upload failed: ${textOf(uploaded)}`).toBe(false);
+      const id = Number(uploaded.structuredContent?.id);
+      expect(id).toBeGreaterThan(0);
+      createdIds.push(id);
+
+      const verification = uploaded.structuredContent?.verification as
+        | { passed?: boolean; featured_set?: boolean; featured_error?: string | null; featured_step?: string | null }
+        | undefined;
+      expect(verification?.passed).toBe(true);
+      expect(verification?.featured_set).toBe(false);
+      expect(verification?.featured_error).toBe("POST_NOT_FOUND");
+      expect(verification?.featured_step).toBe("featured.post_not_found");
+      expect(textOf(uploaded)).toMatch(/Partial success/i);
+
+      const stored = await session.expectSuccess("wordpress_get_media", { id, verify: true });
+      expect(Number(stored.structuredContent?.id)).toBe(id);
+      expect((stored.structuredContent?.verification as { passed?: boolean } | undefined)?.passed).toBe(true);
+    } finally {
+      if (deletedPostId > 0 && !postWasDeleted) {
+        await session.call("wordpress_delete_content", { id: deletedPostId, force: true, confirm: true });
+      }
+    }
+  });
+
   it("records empty-sizes behavior for a 1x1 PNG", async () => {
     const result = await session.call("wordpress_upload_media", {
       title: `E2E tiny ${stamp}`,

@@ -214,6 +214,50 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function concurrent_stale_lock_contenders_allow_only_one_upload_to_claim_the_key(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $staleValue = (string) (time() - 3600);
+        $GLOBALS['wp_test_options'][$lockName] = $staleValue;
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+        $payload = ['file_name' => 'stale-race.png', 'content_base64' => base64_encode($png)];
+        $activeLockValue = 'second-owner|' . (time() + 300);
+        $contender = null;
+
+        // The outer request has already read the stale value when this hook
+        // starts a second retry. Keep the second retry's claimed lock in place
+        // to model it continuing through sideload while the first resumes.
+        $GLOBALS['wp_test_get_option_hook'] = static function (
+            string $name,
+            mixed $observedValue,
+        ) use ($lockName, $staleValue, $payload, $activeLockValue, &$contender): void {
+            if ($name !== $lockName || $observedValue !== $staleValue) {
+                return;
+            }
+
+            unset($GLOBALS['wp_test_get_option_hook']);
+            $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, $activeLockValue): void {
+                unset($GLOBALS['wp_test_sideload_hook']);
+                $GLOBALS['wp_test_options'][$lockName] = $activeLockValue;
+            };
+            $contender = (new MediaService())->upload($payload);
+        };
+
+        $outer = (new MediaService())->upload($payload);
+
+        self::assertIsArray($contender);
+        self::assertSame('upload.sideload', $contender['error_step']);
+        self::assertSame(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, $outer['error']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Only the stale-lock winner may sideload.');
+        self::assertSame($activeLockValue, $GLOBALS['wp_test_options'][$lockName]);
+    }
+
+    #[Test]
     public function it_does_not_let_a_retry_take_over_the_lock_of_an_active_upload(): void
     {
         $png = base64_decode(self::MINIMAL_PNG_BASE64, true);

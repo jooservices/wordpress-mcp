@@ -195,7 +195,13 @@ if (! function_exists('get_option')) {
 
     function get_option(string $name, mixed $default = false): mixed
     {
-        return $GLOBALS['wp_test_options'][$name] ?? $default;
+        $value = $GLOBALS['wp_test_options'][$name] ?? $default;
+
+        if (isset($GLOBALS['wp_test_get_option_hook'])) {
+            ($GLOBALS['wp_test_get_option_hook'])($name, $value);
+        }
+
+        return $value;
     }
 
     function update_option(string $name, mixed $value): bool
@@ -221,6 +227,13 @@ if (! function_exists('get_option')) {
     {
         unset($GLOBALS['wp_test_options'][$name]);
 
+        return true;
+    }
+}
+
+if (! function_exists('wp_cache_delete')) {
+    function wp_cache_delete(mixed $key, string $group = ''): bool
+    {
         return true;
     }
 }
@@ -1113,6 +1126,8 @@ if (! class_exists('wpdb')) {
 
         public string $postmeta = 'wp_postmeta';
 
+        public string $options = 'wp_options';
+
         public string $terms = 'wp_terms';
 
         public string $prefix = 'wp_';
@@ -1187,6 +1202,21 @@ if (! class_exists('wpdb')) {
         public function query(string $query): int|false
         {
             $this->queries[] = $query;
+
+            $lockUpdatePattern = "/^UPDATE wp_options SET option_value = '([^']*)' "
+                . "WHERE option_name = '([^']*)' AND option_value = '([^']*)'$/";
+
+            if (preg_match($lockUpdatePattern, $query, $lockMatch)) {
+                [, $newValue, $name, $expectedValue] = $lockMatch;
+
+                if (($GLOBALS['wp_test_options'][$name] ?? null) !== $expectedValue) {
+                    return 0;
+                }
+
+                $GLOBALS['wp_test_options'][$name] = $newValue;
+
+                return 1;
+            }
 
             if ($query === 'START TRANSACTION') {
                 $GLOBALS['wp_test_transaction_snapshot'] = unserialize(serialize([
