@@ -25,6 +25,27 @@ if (! function_exists('sanitize_key')) {
     }
 }
 
+if (! function_exists('sanitize_user')) {
+    function sanitize_user(string $username, bool $strict = false): string
+    {
+        return strtolower(preg_replace('/[^a-z0-9_.-]/', '', $username) ?? '');
+    }
+}
+
+if (! function_exists('sanitize_email')) {
+    function sanitize_email(string $email): string
+    {
+        return filter_var($email, FILTER_SANITIZE_EMAIL) ?: '';
+    }
+}
+
+if (! function_exists('is_email')) {
+    function is_email(string $email): string|false
+    {
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ?: false;
+    }
+}
+
 if (! function_exists('sanitize_text_field')) {
     function sanitize_text_field(string $text): string
     {
@@ -50,7 +71,7 @@ if (! defined('ABSPATH')) {
         mkdir($wpAdminIncludes, 0777, true);
     }
 
-    foreach (['file.php', 'media.php', 'image.php'] as $stubFile) {
+    foreach (['file.php', 'media.php', 'image.php', 'user.php'] as $stubFile) {
         $stubPath = $wpAdminIncludes . $stubFile;
 
         if (! is_file($stubPath)) {
@@ -163,6 +184,7 @@ if (! function_exists('is_plugin_active')) {
 if (! function_exists('get_option')) {
     /** @var array<string, mixed> $GLOBALS['wp_test_options'] */
     $GLOBALS['wp_test_options'] = [];
+    $GLOBALS['wp_test_option_updates'] = [];
 
     function get_option(string $name, mixed $default = false): mixed
     {
@@ -172,6 +194,7 @@ if (! function_exists('get_option')) {
     function update_option(string $name, mixed $value): bool
     {
         $GLOBALS['wp_test_options'][$name] = $value;
+        $GLOBALS['wp_test_option_updates'][] = [$name, $value];
 
         return true;
     }
@@ -468,9 +491,116 @@ if (! function_exists('wp_trim_words')) {
 }
 
 if (! function_exists('get_userdata')) {
+    if (! class_exists('WP_User')) {
+        #[\AllowDynamicProperties]
+        class WP_User
+        {
+            public int $ID = 0;
+
+            public string $user_login = '';
+
+            public string $user_email = '';
+
+            public string $user_url = '';
+
+            public string $user_registered = '';
+
+            public string $display_name = '';
+
+            public string $description = '';
+
+            public string $first_name = '';
+
+            public string $last_name = '';
+
+            public string $user_pass = '';
+
+            /** @var list<string> */
+            public array $roles = [];
+
+            public function __construct(int $userId = 0)
+            {
+                $this->ID = $userId;
+                $source = $GLOBALS['wp_test_users'][$userId] ?? [];
+
+                if ($source instanceof self && $source !== $this) {
+                    foreach (get_object_vars($source) as $key => $value) {
+                        $this->{$key} = $value;
+                    }
+                } elseif (is_array($source)) {
+                    foreach ($source as $key => $value) {
+                        $this->{$key} = $value;
+                    }
+                }
+            }
+
+            public function set_role(string $role): void
+            {
+                $this->roles = [$role];
+                $GLOBALS['wp_test_users'][$this->ID] = $this;
+            }
+        }
+    }
+
     function get_userdata(int $userId): mixed
     {
         return $GLOBALS['wp_test_users'][$userId] ?? null;
+    }
+
+    function wp_insert_user(array $userdata): int|WP_Error
+    {
+        $GLOBALS['wp_test_insert_user_calls'] = (int) ($GLOBALS['wp_test_insert_user_calls'] ?? 0) + 1;
+        $userId = (int) ($GLOBALS['wp_test_next_user_id'] ?? 1000);
+        $GLOBALS['wp_test_next_user_id'] = $userId + 1;
+        $user = new WP_User($userId);
+
+        foreach ($userdata as $key => $value) {
+            if ($key === 'role') {
+                $user->roles = [(string) $value];
+            } elseif (property_exists($user, $key)) {
+                $user->{$key} = (string) $value;
+            }
+        }
+
+        $user->user_registered = '2026-01-01 00:00:00';
+        $GLOBALS['wp_test_users'][$userId] = $user;
+
+        return $userId;
+    }
+
+    function wp_update_user(array $userdata): int|WP_Error
+    {
+        $GLOBALS['wp_test_update_user_calls'] = (int) ($GLOBALS['wp_test_update_user_calls'] ?? 0) + 1;
+        $userId = (int) ($userdata['ID'] ?? 0);
+        $user = $GLOBALS['wp_test_users'][$userId] ?? null;
+
+        if (! $user instanceof WP_User) {
+            return new WP_Error('invalid_user', 'User not found.');
+        }
+
+        foreach ($userdata as $key => $value) {
+            if ($key !== 'ID' && property_exists($user, $key)) {
+                $user->{$key} = (string) $value;
+            }
+        }
+
+        return $userId;
+    }
+}
+
+if (! function_exists('wp_roles')) {
+    function wp_roles(): object
+    {
+        return (object) ['roles' => $GLOBALS['wp_test_roles'] ?? ['subscriber' => []]];
+    }
+}
+
+if (! function_exists('get_editable_roles')) {
+    function get_editable_roles(): array
+    {
+        return $GLOBALS['wp_test_editable_roles_by_user'][get_current_user_id()]
+            ?? $GLOBALS['wp_test_editable_roles']
+            ?? wp_roles()->roles;
     }
 }
 
@@ -903,8 +1033,24 @@ if (! class_exists('wpdb')) {
 
         public string $terms = 'wp_terms';
 
+        public string $prefix = 'wp_';
+
         /** @var list<string> */
         public array $queries = [];
+
+        /** @var list<array{table: string, data: array<string, mixed>, format: list<string>}> */
+        public array $inserts = [];
+
+        /**
+         * @param array<string, mixed> $data
+         * @param list<string> $format
+         */
+        public function insert(string $table, array $data, array $format = []): int|false
+        {
+            $this->inserts[] = ['table' => $table, 'data' => $data, 'format' => $format];
+
+            return 1;
+        }
 
         public function prepare(string $query, mixed ...$args): string
         {

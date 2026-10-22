@@ -66,9 +66,7 @@ final class RequestContext
         $route = $request->get_route();
 
         if ($connection === null) {
-            (new AuditLogger())->log(null, self::requestId(), 'denied', 'auth', $route, false, [
-                'reason' => 'authentication_failed',
-            ]);
+            (new AuditLogger())->logUnauthenticatedDenied(self::requestId(), $route);
 
             $err = ErrorCodes::error(
                 ErrorCodes::AUTHENTICATION_FAILED,
