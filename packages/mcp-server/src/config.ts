@@ -24,6 +24,7 @@ export interface Config {
   host: string;
   mcpDisabledTools: Set<string>;
   mcpEnabledTools: Set<string> | undefined;
+  mcpAllowAnonymousRead: boolean;
   mcpProtocolVersionPolicy: ProtocolVersionPolicy;
   mcpObservabilityEnabled: boolean;
   mcpMaxSessions: number;
@@ -154,6 +155,7 @@ export function loadConfig(): Config {
     host: process.env.MCP_HOST ?? "0.0.0.0",
     mcpDisabledTools: parseDisabledTools(process.env.MCP_DISABLED_TOOLS),
     mcpEnabledTools: parseEnabledTools(process.env.MCP_ENABLED_TOOLS),
+    mcpAllowAnonymousRead: parseBoolean(process.env.MCP_ALLOW_ANONYMOUS_READ, false),
     mcpProtocolVersionPolicy: parseProtocolVersionPolicy(process.env.MCP_PROTOCOL_VERSION_POLICY),
     mcpObservabilityEnabled: process.env.MCP_OBSERVABILITY_ENABLED !== "0",
     mcpMaxSessions: parsePositiveInt(process.env.MCP_MAX_SESSIONS, 100),

@@ -9,8 +9,12 @@ export const OAUTH_SCOPES = {
   WRITE: "wordpress.write",
 } as const;
 
-export const mixedReadSchemes: SecurityScheme[] = [
+export const anonymousReadSchemes: SecurityScheme[] = [
   { type: "noauth" },
+  { type: "oauth2", scopes: [OAUTH_SCOPES.READ] },
+];
+
+export const oauthReadSchemes: SecurityScheme[] = [
   { type: "oauth2", scopes: [OAUTH_SCOPES.READ] },
 ];
 

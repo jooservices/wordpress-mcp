@@ -10,12 +10,14 @@
 
 | ChatGPT connector | MCP `MCP_AUTH_MODE` | Notes |
 |-------------------|----------------------|-------|
-| **Mixed** (recommended) | `mixed` | Read tools work anonymously; write tools trigger OAuth linking |
-| **OAuth** | `oauth` | All requests require OAuth token |
+| **Mixed** (recommended) | `mixed` | Tool discovery is public; read tools require `wordpress.read` and write tools require `wordpress.write` |
+| **OAuth** | `oauth` | Tool discovery is public; tool calls require their OAuth scope |
 | **No Auth** (dev only) | `none` + `MCP_AUTH_DISABLED=true` | Never use on public URLs |
 | Static bearer (legacy) | `static` + `MCP_AUTH_SECRET` | For clients that send Bearer tokens |
 
 Production default: **`MCP_AUTH_MODE=mixed`**.
+
+Anonymous read tool calls are disabled by default in both Mixed and OAuth modes. To make read tools public, explicitly set `MCP_ALLOW_ANONYMOUS_READ=1`; this does not make write tools public.
 
 ## Production deploy (Docker)
 
@@ -52,7 +54,9 @@ make prod-tunnel
 4. **Create** — ChatGPT completes OAuth against the built-in authorization server
 5. New chat → enable connector
 
-On first write action (create/update/delete/moderate/upload), ChatGPT prompts you to link the app via OAuth. The server displays the client and requested scopes, then requires the configured site-owner credential before issuing a code. A denied request returns an OAuth `access_denied` error.
+By default, ChatGPT needs an OAuth token with `wordpress.read` for read actions and `wordpress.write` for write actions. This applies in Mixed mode too. The MCP tool list remains available before linking.
+
+When ChatGPT links the app via OAuth, the server displays the client and requested scopes, then requires the configured site-owner credential before issuing a code. A denied request returns an OAuth `access_denied` error.
 
 > See [OAUTH-EXPLAINED.md](OAUTH-EXPLAINED.md) for how MCP OAuth scopes and WordPress connection scopes differ.
 
@@ -67,9 +71,9 @@ On first write action (create/update/delete/moderate/upload), ChatGPT prompts yo
 
 | Prompt | Expected |
 |--------|----------|
-| Show my 5 latest WordPress posts | Read tool (works without linking in Mixed mode) |
-| List configured WordPress sites | `wordpress_list_sites` (use before other tools when multiple sites are configured) |
-| Create a draft titled MCP Test on site abc | Write tool with `site: "abc"` (OAuth link required in Mixed mode) |
+| Show my 5 latest WordPress posts | Read tool (`wordpress.read` OAuth link required by default) |
+| List configured WordPress sites | `wordpress_list_sites` (read OAuth required by default; use before other tools when multiple sites are configured) |
+| Create a draft titled MCP Test on site abc | Write tool with `site: "abc"` (`wordpress.write` OAuth required) |
 
 ## Local development
 

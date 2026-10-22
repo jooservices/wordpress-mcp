@@ -1,17 +1,36 @@
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { mixedReadSchemes, oauthWriteSchemes, type SecurityScheme } from "../auth/types.js";
+import {
+  anonymousReadSchemes,
+  oauthReadSchemes,
+  oauthWriteSchemes,
+  type AuthMode,
+  type SecurityScheme,
+} from "../auth/types.js";
 import { getToolAccess } from "./toolPolicy.js";
 
 type ToolsListResult = {
   tools: Array<{ name: string; [key: string]: unknown }>;
 };
 
-function securitySchemesForTool(toolName: string): SecurityScheme[] {
-  return getToolAccess(toolName) === "read" ? mixedReadSchemes : oauthWriteSchemes;
+function securitySchemesForTool(
+  toolName: string,
+  authMode: AuthMode,
+  allowAnonymousRead: boolean,
+): SecurityScheme[] {
+  if (getToolAccess(toolName) !== "read") {
+    return oauthWriteSchemes;
+  }
+
+  return (authMode === "mixed" || authMode === "oauth") && allowAnonymousRead
+    ? anonymousReadSchemes
+    : oauthReadSchemes;
 }
 
-export function patchToolsWithSecuritySchemes(server: McpServer): void {
+export function patchToolsWithSecuritySchemes(
+  server: McpServer,
+  options: { authMode: AuthMode; allowAnonymousRead?: boolean },
+): void {
   const handlers = (server.server as unknown as {
     _requestHandlers?: Map<string, (request: unknown, extra: unknown) => Promise<ToolsListResult>>;
   })._requestHandlers;
@@ -26,7 +45,11 @@ export function patchToolsWithSecuritySchemes(server: McpServer): void {
     return {
       tools: result.tools.map((tool) => ({
         ...tool,
-        securitySchemes: securitySchemesForTool(tool.name),
+        securitySchemes: securitySchemesForTool(
+          tool.name,
+          options.authMode,
+          options.allowAnonymousRead ?? false,
+        ),
       })),
     };
   });

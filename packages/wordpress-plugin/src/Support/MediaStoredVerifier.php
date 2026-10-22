@@ -13,7 +13,7 @@ final class MediaStoredVerifier
      */
     public static function verifyAttachment(int $attachmentId, ?string $sourceSha256 = null): array
     {
-        $filePath = (string) get_attached_file($attachmentId);
+        $filePath = self::sourceFilePath($attachmentId);
         $inspection = MediaImageInspector::inspectFile($filePath);
 
         $verification = MediaVerificationResult::build([
@@ -162,6 +162,24 @@ final class MediaStoredVerifier
         }
 
         return ['ok' => true, 'status' => $status, 'step' => null];
+    }
+
+    /**
+     * WordPress stores big images (> big_image_size_threshold) as a `-scaled`
+     * copy and keeps the uploaded file as the "original image"; the source
+     * hash must be compared with that original, not the scaled copy.
+     */
+    private static function sourceFilePath(int $attachmentId): string
+    {
+        if (function_exists('wp_get_original_image_path')) {
+            $original = wp_get_original_image_path($attachmentId);
+
+            if (is_string($original) && $original !== '' && is_file($original)) {
+                return $original;
+            }
+        }
+
+        return (string) get_attached_file($attachmentId);
     }
 
     private static function hasGeneratedMetadata(int $attachmentId): bool

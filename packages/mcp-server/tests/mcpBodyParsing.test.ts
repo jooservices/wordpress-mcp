@@ -28,7 +28,10 @@ async function reservePort(): Promise<number> {
   return port;
 }
 
-async function startServer(authMode: "static" | "mixed"): Promise<RunningServer> {
+async function startServer(
+  authMode: "static" | "mixed" | "oauth",
+  allowAnonymousRead = false,
+): Promise<RunningServer> {
   const port = await reservePort();
   const oauthDataDir = mkdtempSync(join(tmpdir(), "wordpress-mcp-body-test-"));
   const baseUrl = "http://127.0.0.1:" + port;
@@ -43,13 +46,15 @@ async function startServer(authMode: "static" | "mixed"): Promise<RunningServer>
       WORDPRESS_CONNECTION_TOKEN: "",
       MCP_AUTH_MODE: authMode,
       MCP_AUTH_SECRET: "body-test-static-secret",
-      MCP_PUBLIC_URL: authMode === "mixed" ? baseUrl : "",
-      MCP_OAUTH_OWNER_PASSWORD_HASH: authMode === "mixed" ? TEST_OWNER_PASSWORD_HASH : "",
+      MCP_PUBLIC_URL: authMode === "mixed" || authMode === "oauth" ? baseUrl : "",
+      MCP_OAUTH_OWNER_PASSWORD_HASH:
+        authMode === "mixed" || authMode === "oauth" ? TEST_OWNER_PASSWORD_HASH : "",
       OAUTH_ISSUER_URL: "",
       OAUTH_DATA_DIR: oauthDataDir,
       MCP_HOST: "127.0.0.1",
       MCP_PORT: String(port),
       MCP_JSON_BODY_LIMIT: "2mb",
+      MCP_ALLOW_ANONYMOUS_READ: allowAnonymousRead ? "1" : "0",
       MCP_OAUTH_RATE_LIMIT_ENABLED: "0",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -89,6 +94,102 @@ async function stopServer(server: RunningServer): Promise<void> {
     await exited;
   }
   rmSync(server.oauthDataDir, { recursive: true, force: true });
+}
+
+async function postMcp(
+  server: RunningServer,
+  body: unknown,
+  sessionId?: string,
+  accessToken?: string,
+): Promise<Response> {
+  return fetch(server.baseUrl + "/mcp", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+      ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+async function initializeAnonymousMcpSession(server: RunningServer): Promise<string> {
+  const response = await postMcp(server, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2025-03-26",
+      capabilities: {},
+      clientInfo: { name: "anonymous-test", version: "1.0.0" },
+    },
+  });
+
+  expect(response.status).toBe(200);
+  const sessionId = response.headers.get("mcp-session-id");
+  expect(sessionId).toBeTruthy();
+  return sessionId!;
+}
+
+async function issueOAuthAccessToken(server: RunningServer, scope: string): Promise<string> {
+  const registration = await fetch(server.baseUrl + "/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      redirect_uris: ["http://127.0.0.1/callback"],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+    }),
+  });
+  expect(registration.status).toBe(201);
+  const client = (await registration.json()) as { client_id: string; redirect_uris: string[] };
+  const redirectUri = client.redirect_uris[0] ?? "http://127.0.0.1/callback";
+  const challenge = await pkceChallenge();
+  const resource = server.baseUrl + "/mcp";
+  const authorizeParams = new URLSearchParams({
+    client_id: client.client_id,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    code_challenge: challenge.code_challenge,
+    code_challenge_method: "S256",
+    scope,
+    resource,
+  });
+  const authorization = await fetch(server.baseUrl + "/authorize?" + authorizeParams, { redirect: "manual" });
+  expect(authorization.status).toBe(200);
+  const approvalId = (await authorization.text()).match(/name="approval_id" value="([^"]+)"/)?.[1];
+  expect(approvalId).toBeTruthy();
+  const approval = await fetch(server.baseUrl + "/oauth/consent", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      approval_id: approvalId!,
+      decision: "approve",
+      owner_credential: TEST_OWNER_PASSWORD,
+    }),
+    redirect: "manual",
+  });
+  expect(approval.status).toBe(302);
+  const code = new URL(approval.headers.get("location") ?? "").searchParams.get("code");
+  expect(code).toBeTruthy();
+
+  const tokenResponse = await fetch(server.baseUrl + "/token", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: client.client_id,
+      code: code ?? "",
+      code_verifier: challenge.code_verifier,
+      redirect_uri: redirectUri,
+      resource,
+    }),
+  });
+  expect(tokenResponse.status).toBe(200);
+  const tokens = (await tokenResponse.json()) as { access_token: string };
+  return tokens.access_token;
 }
 
 afterEach(async () => {
@@ -240,5 +341,88 @@ describe("MCP body parsing and authentication order", () => {
     });
     expect(largeAuthenticated.status).not.toBe(413);
     expect(largeAuthenticated.status).not.toBe(401);
+  });
+
+  it("allows anonymous OAuth initialization and tools/list while requiring read scope by default", async () => {
+    const server = await startServer("oauth");
+    const sessionId = await initializeAnonymousMcpSession(server);
+
+    const listResponse = await postMcp(
+      server,
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      sessionId,
+    );
+    expect(listResponse.status).toBe(200);
+    const listPayload = (await listResponse.json()) as {
+      result: { tools: Array<{ name: string; securitySchemes?: Array<{ type: string; scopes?: string[] }> }> };
+    };
+    const readTool = listPayload.result.tools.find((tool) => tool.name === "wordpress_list_sites");
+    expect(readTool?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wordpress.read"] }]);
+
+    const callResponse = await postMcp(
+      server,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "wordpress_list_sites", arguments: {} },
+      },
+      sessionId,
+    );
+    expect(callResponse.status).toBe(200);
+    const callPayload = (await callResponse.json()) as { result: { isError?: boolean } };
+    expect(callPayload.result.isError).toBe(true);
+
+    const readToken = await issueOAuthAccessToken(server, "wordpress.read");
+    const authenticatedCall = await postMcp(
+      server,
+      {
+        jsonrpc: "2.0",
+        id: 4,
+        method: "tools/call",
+        params: { name: "wordpress_list_sites", arguments: {} },
+      },
+      sessionId,
+      readToken,
+    );
+    expect(authenticatedCall.status).toBe(200);
+    const authenticatedPayload = (await authenticatedCall.json()) as { result: { isError?: boolean } };
+    expect(authenticatedPayload.result.isError).toBeUndefined();
+  });
+
+  it("advertises and allows anonymous OAuth reads only with MCP_ALLOW_ANONYMOUS_READ=1", async () => {
+    const server = await startServer("oauth", true);
+    const sessionId = await initializeAnonymousMcpSession(server);
+
+    const listResponse = await postMcp(
+      server,
+      { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
+      sessionId,
+    );
+    expect(listResponse.status).toBe(200);
+    const listPayload = (await listResponse.json()) as {
+      result: { tools: Array<{ name: string; securitySchemes?: Array<{ type: string; scopes?: string[] }> }> };
+    };
+    const readTool = listPayload.result.tools.find((tool) => tool.name === "wordpress_list_sites");
+    expect(readTool?.securitySchemes).toEqual([
+      { type: "noauth" },
+      { type: "oauth2", scopes: ["wordpress.read"] },
+    ]);
+    const writeTool = listPayload.result.tools.find((tool) => tool.name === "wordpress_create_content");
+    expect(writeTool?.securitySchemes).toEqual([{ type: "oauth2", scopes: ["wordpress.write"] }]);
+
+    const callResponse = await postMcp(
+      server,
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "wordpress_list_sites", arguments: {} },
+      },
+      sessionId,
+    );
+    expect(callResponse.status).toBe(200);
+    const callPayload = (await callResponse.json()) as { result: { isError?: boolean } };
+    expect(callPayload.result.isError).toBeUndefined();
   });
 });

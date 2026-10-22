@@ -1,3 +1,4 @@
+import { runWithAuth } from "../src/auth/context.js";
 import { describe, expect, it } from "vitest";
 import { assertToolPermission, getToolAccess, registerToolAccess } from "../src/mcp/toolPolicy.js";
 import type { ToolPolicyOptions } from "../src/mcp/toolPolicy.js";
@@ -49,17 +50,17 @@ describe("assertToolPermission", () => {
       assertToolPermission(
         "wordpress_get_content",
         "read",
-        options({ enabledTools: new Set(["wordpress_get_content"]) }),
+        options({ enabledTools: new Set(["wordpress_get_content"]), allowAnonymousRead: true }),
       ),
     ).toBeNull();
   });
 
   it("ignores the allowlist when it is undefined", () => {
-    expect(assertToolPermission("wordpress_get_content", "read", options({ enabledTools: undefined }))).toBeNull();
+    expect(assertToolPermission("wordpress_get_content", "read", options({ enabledTools: undefined, allowAnonymousRead: true }))).toBeNull();
   });
 
-  it("allows read tools without scopes (mixed/oauth read)", () => {
-    expect(assertToolPermission("wordpress_search_content", "read", options())).toBeNull();
+  it("allows anonymous read tools only when allowAnonymousRead is set", () => {
+    expect(assertToolPermission("wordpress_search_content", "read", options({ allowAnonymousRead: true }))).toBeNull();
   });
 
   it("skips the scope check for write tools in static/none modes", () => {
@@ -70,5 +71,41 @@ describe("assertToolPermission", () => {
   it("challenges write/delete tools under oauth without a write scope", () => {
     const result = assertToolPermission("wordpress_create_content", "write", options());
     expect(result?.isError).toBe(true);
+  });
+});
+
+describe("assertToolPermission read access in oauth/mixed", () => {
+  const withScopes = <T>(scopes: string[], fn: () => T): T =>
+    runWithAuth({ token: "t", clientId: "c", scopes }, fn);
+
+  it("denies anonymous read tools with an invalid_token challenge", () => {
+    for (const authMode of ["mixed", "oauth"] as const) {
+      const result = assertToolPermission("wordpress_list_users", "read", options({ authMode }));
+      expect(result?.isError).toBe(true);
+      expect(JSON.stringify(result?._meta)).toContain("invalid_token");
+    }
+  });
+
+  it("denies a token without read scope", () => {
+    const result = withScopes(["other"], () => assertToolPermission("wordpress_list_users", "read", options()));
+    expect(result?.isError).toBe(true);
+    expect(JSON.stringify(result?._meta)).toContain("insufficient_scope");
+  });
+
+  it("allows a token with read scope", () => {
+    expect(
+      withScopes(["wordpress.read"], () => assertToolPermission("wordpress_list_users", "read", options())),
+    ).toBeNull();
+  });
+
+  it("allows anonymous reads when allowAnonymousRead is set, but still denies anonymous writes", () => {
+    const opts = options({ allowAnonymousRead: true });
+    expect(assertToolPermission("wordpress_list_users", "read", opts)).toBeNull();
+    expect(assertToolPermission("wordpress_create_content", "write", opts)?.isError).toBe(true);
+  });
+
+  it("does not require auth for read tools in none/static modes", () => {
+    expect(assertToolPermission("wordpress_list_users", "read", options({ authMode: "none" }))).toBeNull();
+    expect(assertToolPermission("wordpress_list_users", "read", options({ authMode: "static" }))).toBeNull();
   });
 });
