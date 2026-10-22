@@ -5,9 +5,11 @@ import { join } from "node:path";
 import express from "express";
 import pkceChallenge from "pkce-challenge";
 import { afterEach, describe, expect, it } from "vitest";
-import { mcpAuthRouter } from "@modelcontextprotocol/sdk/server/auth/router.js";
-import { createOAuthProvider } from "../src/auth/provider.js";
+import { setupOAuth } from "../src/auth/setup.js";
+import type { WordPressOAuthProvider } from "../src/auth/provider.js";
+import type { Config } from "../src/config.js";
 import { OAUTH_SCOPES } from "../src/auth/types.js";
+import { TEST_OWNER_PASSWORD, TEST_OWNER_PASSWORD_HASH } from "./oauthFixtures.js";
 
 const redirectUri = "https://chatgpt.com/connector/oauth/callback";
 const issuerUrl = new URL("https://mcp.example.com");
@@ -15,30 +17,44 @@ const mcpResourceUrl = new URL("https://mcp.example.com/mcp");
 
 async function withOAuthServer(
   dataDir: string,
-  run: (baseUrl: string, provider: ReturnType<typeof createOAuthProvider>) => Promise<void>,
+  run: (baseUrl: string, provider: WordPressOAuthProvider) => Promise<void>,
+  consentMax?: number,
 ): Promise<void> {
-  const provider = createOAuthProvider({
-    dataDir,
-    tokenTtlSeconds: 3600,
-    refreshTtlSeconds: 7_776_000,
-    validateResource: (resource) => resource?.href === mcpResourceUrl.href,
-  });
-
   const app = express();
   app.use(express.json());
-  app.use(express.urlencoded({ extended: false }));
-  app.use(
-    mcpAuthRouter({
-      provider,
-      issuerUrl,
-      scopesSupported: [OAUTH_SCOPES.READ, OAUTH_SCOPES.WRITE],
-      resourceServerUrl: mcpResourceUrl,
-      resourceName: "WordPress MCP",
-      tokenOptions: { rateLimit: false },
-      clientRegistrationOptions: { rateLimit: false },
-      authorizationOptions: { rateLimit: false },
-    }),
-  );
+  const config: Config = {
+    sites: [],
+    mcpAuthSecret: "",
+    mcpAuthDisabled: false,
+    mcpAuthMode: "mixed",
+    mcpPublicUrl: issuerUrl.origin,
+    oauthIssuerUrl: issuerUrl.origin,
+    oauthTokenTtlSeconds: 3600,
+    oauthRefreshTtlSeconds: 7_776_000,
+    oauthRefreshGraceSeconds: 120,
+    oauthClientRetentionMs: 7 * 24 * 60 * 60 * 1000,
+    oauthDataDir: dataDir,
+    oauthOwnerPasswordHash: TEST_OWNER_PASSWORD_HASH,
+    oauthRateLimit: {
+      enabled: consentMax !== undefined,
+      register: { max: 100, windowMs: 60_000 },
+      token: { max: 100, windowMs: 60_000 },
+      authorize: { max: 100, windowMs: 60_000 },
+      consent: { max: consentMax ?? 100, windowMs: 60_000 },
+      revoke: { max: 100, windowMs: 60_000 },
+    },
+    trustProxy: false,
+    port: 3000,
+    host: "127.0.0.1",
+    mcpDisabledTools: new Set(),
+    mcpEnabledTools: undefined,
+    mcpProtocolVersionPolicy: "fallback",
+    mcpObservabilityEnabled: false,
+    mcpMaxSessions: 100,
+    mcpSessionIdleMs: 1_800_000,
+    mcpJsonBodyLimit: "100mb",
+  };
+  const { provider } = setupOAuth(app, config);
 
   let server: Server | undefined;
 
@@ -62,6 +78,38 @@ async function withOAuthServer(
       server!.close((error) => (error ? reject(error) : resolve()));
     });
   }
+}
+
+async function beginAuthorization(baseUrl: string, state = "test-state"): Promise<{ clientId: string; approvalId: string }> {
+  const registration = await fetch(`${baseUrl}/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+    }),
+  });
+  expect(registration.status).toBe(201);
+  const client = (await registration.json()) as { client_id: string; redirect_uris: string[] };
+  const challenge = await pkceChallenge();
+  const params = new URLSearchParams({
+    client_id: client.client_id,
+    redirect_uri: client.redirect_uris[0] ?? redirectUri,
+    response_type: "code",
+    code_challenge: challenge.code_challenge,
+    code_challenge_method: "S256",
+    scope: `${OAUTH_SCOPES.READ} ${OAUTH_SCOPES.WRITE}`,
+    resource: mcpResourceUrl.href,
+    state,
+  });
+  const authorization = await fetch(`${baseUrl}/authorize?${params.toString()}`, { redirect: "manual" });
+  expect(authorization.status).toBe(200);
+  const page = await authorization.text();
+  const approvalId = page.match(/name="approval_id" value="([^"]+)"/)?.[1];
+  expect(approvalId).toBeTruthy();
+  return { clientId: client.client_id, approvalId: approvalId! };
 }
 
 describe("OAuth HTTP endpoints", () => {
@@ -117,13 +165,39 @@ describe("OAuth HTTP endpoints", () => {
         redirect: "manual",
       });
 
-      if (authorizeResponse.status !== 302) {
-        const errorBody = await authorizeResponse.text();
-        throw new Error(`Authorize failed (${authorizeResponse.status}): ${errorBody}`);
-      }
+      expect(authorizeResponse.status).toBe(200);
+      expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
+      const consentPage = await authorizeResponse.text();
+      expect(consentPage).toContain("Approve MCP access");
+      expect(consentPage).toContain(`${OAUTH_SCOPES.READ}, ${OAUTH_SCOPES.WRITE}`);
+      const approvalId = consentPage.match(/name="approval_id" value="([^"]+)"/)?.[1];
+      expect(approvalId).toBeTruthy();
 
-      expect(authorizeResponse.status).toBe(302);
-      const location = authorizeResponse.headers.get("location");
+      const invalidCredential = await fetch(`${baseUrl}/oauth/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          approval_id: approvalId!,
+          decision: "approve",
+          owner_credential: "invalid-owner-password",
+        }),
+        redirect: "manual",
+      });
+      expect(invalidCredential.status).toBe(403);
+      expect(await invalidCredential.text()).toContain("site-owner credential is invalid");
+
+      const approvalResponse = await fetch(`${baseUrl}/oauth/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          approval_id: approvalId!,
+          decision: "approve",
+          owner_credential: TEST_OWNER_PASSWORD,
+        }),
+        redirect: "manual",
+      });
+      expect(approvalResponse.status).toBe(302);
+      const location = approvalResponse.headers.get("location");
       expect(location).toBeTruthy();
 
       const callbackUrl = new URL(location!);
@@ -171,6 +245,50 @@ describe("OAuth HTTP endpoints", () => {
       expect(refreshed.access_token).not.toBe(tokens.access_token);
       expect(refreshed.refresh_token).not.toBe(tokens.refresh_token);
     });
+  });
+
+  it("redirects denied requests with an OAuth error and preserves state", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oauth-http-deny-"));
+    dirs.push(dir);
+
+    await withOAuthServer(dir, async (baseUrl) => {
+      const { approvalId } = await beginAuthorization(baseUrl, "denial-state");
+      const denied = await fetch(`${baseUrl}/oauth/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ approval_id: approvalId, decision: "deny" }),
+        redirect: "manual",
+      });
+
+      expect(denied.status).toBe(302);
+      const callback = new URL(denied.headers.get("location")!);
+      expect(callback.searchParams.get("error")).toBe("access_denied");
+      expect(callback.searchParams.get("state")).toBe("denial-state");
+      expect(callback.searchParams.has("code")).toBe(false);
+    });
+  });
+
+  it("rate limits owner credential submissions", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "oauth-http-consent-limit-"));
+    dirs.push(dir);
+
+    await withOAuthServer(dir, async (baseUrl) => {
+      const { approvalId } = await beginAuthorization(baseUrl);
+      const submit = () => fetch(`${baseUrl}/oauth/consent`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          approval_id: approvalId,
+          decision: "approve",
+          owner_credential: "wrong-password",
+        }),
+      });
+
+      expect((await submit()).status).toBe(403);
+      const limited = await submit();
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("ratelimit-limit")).toBe("1");
+    }, 1);
   });
 
   it("keeps registered clients after server restart", async () => {

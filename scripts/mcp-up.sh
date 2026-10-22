@@ -153,6 +153,7 @@ sites_json='[]'
 public_url="http://localhost:3000"
 auth_mode="static"
 auth_secret=""
+oauth_owner_hash=""
 publish_mode="local"
 mcp_domain=""
 acme_email=""
@@ -268,11 +269,29 @@ PY
     fi
   fi
 
+  if [[ "$auth_mode" == "mixed" || "$auth_mode" == "oauth" ]]; then
+    owner_password="$(ask_secret "Site-owner credential for OAuth approvals")"
+    if [[ -z "$owner_password" ]]; then
+      echo "A site-owner credential is required for OAuth approval." >&2
+      exit 1
+    fi
+    oauth_owner_hash="$(printf '%s' "$owner_password" | python3 -c '
+import base64, hashlib, os, sys
+password = sys.stdin.buffer.read()
+salt = os.urandom(16)
+digest = hashlib.scrypt(password, salt=salt, n=16384, r=8, p=1, dklen=64)
+encode = lambda value: base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+print("$".join(("scrypt", "16384", "8", "1", encode(salt), encode(digest))))
+')"
+    unset owner_password
+  fi
+
   umask 077
   SITES_JSON="$sites_json" \
   PUBLIC_URL="$public_url" \
   AUTH_MODE="$auth_mode" \
   AUTH_SECRET="$auth_secret" \
+  OWNER_HASH="$oauth_owner_hash" \
   PUBLISH_MODE="$publish_mode" \
   MCP_DOMAIN="$mcp_domain" \
   ACME_EMAIL="$acme_email" \
@@ -298,6 +317,8 @@ lines = [
     "MCP_PUBLISH=127.0.0.1:3000:3000",
     "OAUTH_DATA_DIR=/app/data/oauth",
 ]
+if os.environ["OWNER_HASH"]:
+    lines.append(f"MCP_OAUTH_OWNER_PASSWORD_HASH='{os.environ['OWNER_HASH']}'")
 if mode == "https":
     lines.append(f"MCP_DOMAIN={os.environ['MCP_DOMAIN']}")
     lines.append(f"ACME_EMAIL={os.environ['ACME_EMAIL']}")

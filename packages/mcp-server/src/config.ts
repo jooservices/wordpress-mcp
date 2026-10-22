@@ -3,6 +3,7 @@ import type { AuthMode } from "./auth/types.js";
 import type { ProtocolVersionPolicy } from "./mcp/versionNegotiator.js";
 import { loadWordPressSites } from "./sites/loadSites.js";
 import type { WordPressSiteConfig } from "./sites/types.js";
+import { isOwnerCredentialHash } from "./auth/ownerCredential.js";
 
 export interface Config {
   sites: WordPressSiteConfig[];
@@ -16,6 +17,7 @@ export interface Config {
   oauthRefreshGraceSeconds: number;
   oauthClientRetentionMs: number;
   oauthDataDir: string;
+  oauthOwnerPasswordHash: string;
   oauthRateLimit: OAuthRateLimitConfig;
   trustProxy: boolean;
   port: number;
@@ -97,6 +99,10 @@ function parseOAuthRateLimit(): OAuthRateLimitConfig {
       max: parsePositiveInt(process.env.MCP_OAUTH_AUTHORIZE_MAX, 100),
       windowMs: parsePositiveInt(process.env.MCP_OAUTH_AUTHORIZE_WINDOW_MS, 15 * 60 * 1000),
     },
+    consent: {
+      max: parsePositiveInt(process.env.MCP_OAUTH_CONSENT_MAX, 5),
+      windowMs: parsePositiveInt(process.env.MCP_OAUTH_CONSENT_WINDOW_MS, 15 * 60 * 1000),
+    },
     revoke: {
       max: parsePositiveInt(process.env.MCP_OAUTH_REVOKE_MAX, 50),
       windowMs: parsePositiveInt(process.env.MCP_OAUTH_REVOKE_WINDOW_MS, 15 * 60 * 1000),
@@ -112,6 +118,7 @@ export function loadConfig(): Config {
   const mcpAuthSecret = process.env.MCP_AUTH_SECRET ?? "";
   const mcpPublicUrl = process.env.MCP_PUBLIC_URL?.replace(/\/$/, "") ?? "";
   const oauthIssuerUrl = process.env.OAUTH_ISSUER_URL?.replace(/\/$/, "") ?? mcpPublicUrl;
+  const oauthOwnerPasswordHash = process.env.MCP_OAUTH_OWNER_PASSWORD_HASH ?? "";
 
   if (mcpAuthMode === "static" && !mcpAuthSecret) {
     throw new Error("Missing required env: MCP_AUTH_SECRET (MCP_AUTH_MODE=static)");
@@ -119,6 +126,13 @@ export function loadConfig(): Config {
 
   if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && !mcpPublicUrl) {
     throw new Error("Missing required env: MCP_PUBLIC_URL (required for OAuth/Mixed auth)");
+  }
+
+  if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && !oauthOwnerPasswordHash) {
+    throw new Error("Missing required env: MCP_OAUTH_OWNER_PASSWORD_HASH (required for OAuth/Mixed auth)");
+  }
+  if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && !isOwnerCredentialHash(oauthOwnerPasswordHash)) {
+    throw new Error("Invalid MCP_OAUTH_OWNER_PASSWORD_HASH (expected a scrypt hash)");
   }
 
   return {
@@ -133,6 +147,7 @@ export function loadConfig(): Config {
     oauthRefreshGraceSeconds: parsePositiveInt(process.env.OAUTH_REFRESH_GRACE_SECONDS, 120),
     oauthClientRetentionMs: parsePositiveInt(process.env.OAUTH_CLIENT_RETENTION_DAYS, 7) * 24 * 60 * 60 * 1000,
     oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
+    oauthOwnerPasswordHash,
     oauthRateLimit: parseOAuthRateLimit(),
     trustProxy: parseBoolean(process.env.MCP_TRUST_PROXY, true),
     port: Number(process.env.MCP_PORT ?? 3000),

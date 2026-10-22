@@ -52,7 +52,7 @@ make prod-tunnel
 4. **Create** — ChatGPT completes OAuth against the built-in authorization server
 5. New chat → enable connector
 
-On first write action (create/update/delete/moderate/upload), ChatGPT prompts you to link the app via OAuth.
+On first write action (create/update/delete/moderate/upload), ChatGPT prompts you to link the app via OAuth. The server displays the client and requested scopes, then requires the configured site-owner credential before issuing a code. A denied request returns an OAuth `access_denied` error.
 
 > See [OAUTH-EXPLAINED.md](OAUTH-EXPLAINED.md) for how MCP OAuth scopes and WordPress connection scopes differ.
 
