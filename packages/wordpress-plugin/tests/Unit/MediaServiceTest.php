@@ -129,6 +129,24 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_does_not_apply_the_idempotency_key_to_uploads_without_a_post(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+        $GLOBALS['wp_test_postmeta'][9100] = [
+            '_mcp_media_upload_sha256' => hash('sha256', $png),
+            '_mcp_media_upload_post_id' => '0',
+        ];
+
+        $result = (new MediaService())->upload(['file_name' => 'nopost.png', 'content_base64' => base64_encode($png)]);
+
+        self::assertSame('upload.sideload', $result['error_step']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Without a post the same bytes are stored again.');
+    }
+
+    #[Test]
     public function it_rejects_replay_when_the_stored_file_no_longer_matches_the_upload_key(): void
     {
         $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
@@ -198,13 +216,14 @@ final class MediaServiceTest extends TestCase
         self::assertNotFalse($png);
         $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
 
-        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
         $GLOBALS['wp_test_options'][$lockName] = (string) (time() - 3600);
 
         $GLOBALS['wp_test_sideload_calls'] = 0;
 
         $result = (new MediaService())->upload([
             'file_name' => 'stale.png',
+            'post_id' => 70,
             'content_base64' => base64_encode($png),
         ]);
 
@@ -221,11 +240,11 @@ final class MediaServiceTest extends TestCase
         $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
         add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
 
-        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
         $staleValue = (string) (time() - 3600);
         $GLOBALS['wp_test_options'][$lockName] = $staleValue;
         $GLOBALS['wp_test_sideload_calls'] = 0;
-        $payload = ['file_name' => 'stale-race.png', 'content_base64' => base64_encode($png)];
+        $payload = ['file_name' => 'stale-race.png', 'post_id' => 70, 'content_base64' => base64_encode($png)];
         $activeLockValue = 'second-owner|' . (time() + 300);
         $contender = null;
 
@@ -266,7 +285,7 @@ final class MediaServiceTest extends TestCase
         add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
         $GLOBALS['wp_test_sideload_calls'] = 0;
 
-        $payload = ['file_name' => 'active.png', 'content_base64' => base64_encode($png)];
+        $payload = ['file_name' => 'active.png', 'post_id' => 70, 'content_base64' => base64_encode($png)];
         $retry = null;
         $GLOBALS['wp_test_sideload_hook'] = static function () use (&$retry, $payload): void {
             // The first request is mid-sideload with its idempotency meta not stored yet.
@@ -291,7 +310,7 @@ final class MediaServiceTest extends TestCase
         self::assertNotFalse($png);
         $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
 
-        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
         $foreign = 'other-owner|' . (time() + 300);
         $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, $foreign): void {
             // A takeover replaced the lock while this request was still running.
@@ -299,7 +318,7 @@ final class MediaServiceTest extends TestCase
         };
 
         try {
-            (new MediaService())->upload(['file_name' => 'owner.png', 'content_base64' => base64_encode($png)]);
+            (new MediaService())->upload(['file_name' => 'owner.png', 'post_id' => 70, 'content_base64' => base64_encode($png)]);
         } finally {
             unset($GLOBALS['wp_test_sideload_hook']);
         }

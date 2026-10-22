@@ -150,6 +150,13 @@ final class MediaService
         }
 
         $targetPostId = max(0, (int) ($data['post_id'] ?? 0));
+
+        // The idempotency key is sha256 + post. Without a post there is no key:
+        // the same bytes are legitimately uploaded again as separate media.
+        if ($targetPostId === 0) {
+            return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, 0, '', '');
+        }
+
         $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
 
         if ($existingId !== null) {
@@ -834,6 +841,10 @@ final class MediaService
     /** Extends the lease, but only while this request still owns the lock. */
     private function renewUploadLock(string $lockName, string $token): void
     {
+        if ($lockName === '') {
+            return;
+        }
+
         if ($this->lockOwner((string) get_option($lockName, '')) === $token) {
             update_option($lockName, $this->lockValue($token));
         }
