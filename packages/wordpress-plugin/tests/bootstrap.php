@@ -25,6 +25,13 @@ if (! function_exists('sanitize_key')) {
     }
 }
 
+if (! function_exists('wp_json_encode')) {
+    function wp_json_encode(mixed $data, int $flags = 0, int $depth = 512): string|false
+    {
+        return json_encode($data, $flags, $depth);
+    }
+}
+
 if (! function_exists('sanitize_user')) {
     function sanitize_user(string $username, bool $strict = false): string
     {
