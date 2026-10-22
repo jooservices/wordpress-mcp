@@ -59,6 +59,7 @@ function getMcpServerOptions() {
     resourceMetadataUrl: oauthRuntime?.resourceMetadataUrl,
     disabledTools: config.mcpDisabledTools,
     enabledTools: config.mcpEnabledTools,
+    allowAnonymousRead: config.mcpAllowAnonymousRead,
     observability,
     protocolVersionPolicy: config.mcpProtocolVersionPolicy,
     activeSiteStore,
