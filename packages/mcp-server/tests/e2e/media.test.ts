@@ -60,6 +60,7 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     expect(id).toBeGreaterThan(0);
     createdIds.push(id);
     expect(verification?.passed, `large JPEG verification: ${JSON.stringify(verification)}`).toBe(true);
+    expect((verification as { sha256_match?: boolean } | undefined)?.sha256_match).toBe(true);
   });
 
   it("rejects undecodable bytes with a verification_step", async () => {
