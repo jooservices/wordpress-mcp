@@ -10,6 +10,10 @@ import { verifyOwnerCredential } from "./ownerCredential.js";
 
 const PENDING_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
 const MAX_PENDING_AUTHORIZATIONS = 1000;
+const CONSENT_SECURITY_HEADERS = {
+  "Content-Security-Policy": "frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+} as const;
 
 type PendingAuthorization = {
   client: OAuthClientInformationFull;
@@ -71,6 +75,8 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
     params: AuthorizationParams,
     res: Response,
   ): Promise<void> {
+    res.set(CONSENT_SECURITY_HEADERS);
+
     if (!redirectUriRegistered(client, params.redirectUri)) {
       throw new InvalidRequestError("Unregistered redirect_uri");
     }
@@ -110,6 +116,7 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
     ownerCredential: string,
     res: Response,
   ): Promise<void> {
+    res.set(CONSENT_SECURITY_HEADERS);
     res.setHeader("Cache-Control", "no-store");
     const pending = this.pendingAuthorizations.get(approvalId);
     if (!pending || pending.expiresAt <= Date.now()) {

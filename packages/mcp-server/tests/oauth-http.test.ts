@@ -167,6 +167,8 @@ describe("OAuth HTTP endpoints", () => {
 
       expect(authorizeResponse.status).toBe(200);
       expect(authorizeResponse.headers.get("cache-control")).toContain("no-store");
+      expect(authorizeResponse.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      expect(authorizeResponse.headers.get("x-frame-options")).toBe("DENY");
       const consentPage = await authorizeResponse.text();
       expect(consentPage).toContain("Approve MCP access");
       expect(consentPage).toContain(`${OAUTH_SCOPES.READ}, ${OAUTH_SCOPES.WRITE}`);
@@ -184,6 +186,8 @@ describe("OAuth HTTP endpoints", () => {
         redirect: "manual",
       });
       expect(invalidCredential.status).toBe(403);
+      expect(invalidCredential.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
+      expect(invalidCredential.headers.get("x-frame-options")).toBe("DENY");
       expect(await invalidCredential.text()).toContain("site-owner credential is invalid");
 
       const approvalResponse = await fetch(`${baseUrl}/oauth/consent`, {
