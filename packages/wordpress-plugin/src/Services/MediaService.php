@@ -194,8 +194,16 @@ final class MediaService
      * @param array<string, mixed> $preCheck
      * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
      */
-    private function storeUpload(array $data, array $naming, array $preCheck, string $content, string $fileName, int $targetPostId, string $lockName, string $lockToken): array
-    {
+    private function storeUpload(
+        array $data,
+        array $naming,
+        array $preCheck,
+        string $content,
+        string $fileName,
+        int $targetPostId,
+        string $lockName,
+        string $lockToken,
+    ): array {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -782,7 +790,7 @@ final class MediaService
     {
         $token = bin2hex(random_bytes(16));
 
-        if (add_option($lockName, $this->lockValue($token), '', false)) {
+        if ($this->reserveUploadLock($lockName, $token)) {
             return $token;
         }
 
@@ -792,7 +800,13 @@ final class MediaService
 
         delete_option($lockName);
 
-        return add_option($lockName, $this->lockValue($token), '', false) ? $token : null;
+        return $this->reserveUploadLock($lockName, $token) ? $token : null;
+    }
+
+    /** @phpstan-impure */
+    private function reserveUploadLock(string $lockName, string $token): bool
+    {
+        return add_option($lockName, $this->lockValue($token), '', false);
     }
 
     /** Extends the lease, but only while this request still owns the lock. */

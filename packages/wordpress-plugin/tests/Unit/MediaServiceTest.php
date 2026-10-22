@@ -180,6 +180,7 @@ final class MediaServiceTest extends TestCase
         self::assertNotFalse($png);
         $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
         add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+        $GLOBALS['wp_test_sideload_calls'] = 0;
 
         $payload = ['file_name' => 'active.png', 'content_base64' => base64_encode($png)];
         $retry = null;
