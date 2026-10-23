@@ -10,6 +10,11 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 export const runE2E = process.env.RUN_E2E === "1" || process.env.RUN_E2E_FULL === "1";
 export const runE2EFull = process.env.RUN_E2E_FULL === "1";
 
+// The MCP server may wait up to 120 seconds for WordPress. Leave room for
+// that request plus MCP transport overhead so the test client does not report
+// a timeout after WordPress has completed the upload.
+const E2E_TOOL_CALL_TIMEOUT_MS = 150_000;
+
 export const mcpUrl = (process.env.MCP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 export const mcpSecret = process.env.MCP_AUTH_SECRET ?? "dev-mcp-secret-local-only";
 export const siteId = process.env.WORDPRESS_SITE_ID?.trim() || "default";
@@ -166,7 +171,9 @@ export class McpSession {
 
   async call(name: ToolName | string, args: Record<string, unknown> = {}): Promise<ToolCallResult> {
     this.exercised.add(name);
-    return (await this.client.callTool({ name, arguments: args })) as ToolCallResult;
+    return (await this.client.callTool({ name, arguments: args }, undefined, {
+      timeout: E2E_TOOL_CALL_TIMEOUT_MS,
+    })) as ToolCallResult;
   }
 
   async expectSuccess(name: ToolName | string, args: Record<string, unknown> = {}): Promise<ToolCallResult> {
