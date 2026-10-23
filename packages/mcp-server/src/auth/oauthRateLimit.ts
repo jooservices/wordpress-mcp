@@ -10,10 +10,11 @@ export type OAuthRateLimitConfig = {
   register: OAuthEndpointRateLimit;
   token: OAuthEndpointRateLimit;
   authorize: OAuthEndpointRateLimit;
+  consent: OAuthEndpointRateLimit;
   revoke: OAuthEndpointRateLimit;
 };
 
-export type OAuthRateLimitEndpoint = "register" | "token" | "authorize" | "revoke";
+export type OAuthRateLimitEndpoint = "register" | "token" | "authorize" | "consent" | "revoke";
 
 export function buildOAuthRateLimitOptions(
   config: OAuthRateLimitConfig,

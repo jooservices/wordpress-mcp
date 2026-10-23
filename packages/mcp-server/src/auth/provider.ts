@@ -6,6 +6,20 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { InvalidRequestError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import { OAUTH_SCOPES } from "./types.js";
 import { FileOAuthStore, type RefreshReplacement } from "./store.js";
+import { verifyOwnerCredential } from "./ownerCredential.js";
+
+const PENDING_AUTHORIZATION_TTL_MS = 10 * 60 * 1000;
+const MAX_PENDING_AUTHORIZATIONS = 1000;
+const CONSENT_SECURITY_HEADERS = {
+  "Content-Security-Policy": "frame-ancestors 'none'",
+  "X-Frame-Options": "DENY",
+} as const;
+
+type PendingAuthorization = {
+  client: OAuthClientInformationFull;
+  params: AuthorizationParams;
+  expiresAt: number;
+};
 
 export class InvalidAccessTokenError extends Error {
   constructor() {
@@ -36,7 +50,7 @@ function filterRefreshScopes(requested: string[] | undefined, allowed: string[])
 
 /**
  * Built-in OAuth authorization server for single-instance Docker deployments.
- * Auto-approves ChatGPT connector linking (no interactive login page).
+ * Authorization codes are issued only after site-owner approval.
  */
 export class WordPressOAuthProvider implements OAuthServerProvider {
   get clientsStore() {
@@ -49,16 +63,20 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
     private readonly tokenTtlSeconds = 3600,
     private readonly refreshTtlSeconds = 7_776_000,
     private readonly refreshGraceSeconds = 120,
+    private readonly ownerCredentialHash = "",
   ) {}
 
   /** Serialises concurrent refreshes of the same token so only one rotation happens. */
   private readonly refreshLocks = new Map<string, Promise<unknown>>();
+  private readonly pendingAuthorizations = new Map<string, PendingAuthorization>();
 
   async authorize(
     client: OAuthClientInformationFull,
     params: AuthorizationParams,
     res: Response,
   ): Promise<void> {
+    res.set(CONSENT_SECURITY_HEADERS);
+
     if (!redirectUriRegistered(client, params.redirectUri)) {
       throw new InvalidRequestError("Unregistered redirect_uri");
     }
@@ -67,20 +85,85 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
       throw new InvalidRequestError("Invalid resource parameter");
     }
 
-    const code = randomUUID();
-    await this.store.saveAuthCode(code, {
+    if (!this.ownerCredentialHash) {
+      res.status(503).setHeader("Cache-Control", "no-store");
+      res.type("html").send(renderErrorPage("Site-owner approval is not configured."));
+      return;
+    }
+
+    const now = Date.now();
+    this.prunePendingAuthorizations(now);
+    if (this.pendingAuthorizations.size >= MAX_PENDING_AUTHORIZATIONS) {
+      res.status(503).setHeader("Cache-Control", "no-store");
+      res.type("html").send(renderErrorPage("Too many authorization requests are pending. Please try again later."));
+      return;
+    }
+
+    const approvalId = randomUUID();
+    this.pendingAuthorizations.set(approvalId, {
       client,
       params,
+      expiresAt: now + PENDING_AUTHORIZATION_TTL_MS,
+    });
+
+    res.status(200).setHeader("Cache-Control", "no-store");
+    res.type("html").send(renderConsentPage(approvalId, client, params));
+  }
+
+  async completeAuthorization(
+    approvalId: string,
+    decision: string,
+    ownerCredential: string,
+    res: Response,
+  ): Promise<void> {
+    res.set(CONSENT_SECURITY_HEADERS);
+    res.setHeader("Cache-Control", "no-store");
+    const pending = this.pendingAuthorizations.get(approvalId);
+    if (!pending || pending.expiresAt <= Date.now()) {
+      this.pendingAuthorizations.delete(approvalId);
+      res.status(400).type("html").send(renderErrorPage("This authorization request has expired or is invalid."));
+      return;
+    }
+
+    if (decision === "deny") {
+      this.pendingAuthorizations.delete(approvalId);
+      const target = new URL(pending.params.redirectUri);
+      target.searchParams.set("error", "access_denied");
+      target.searchParams.set("error_description", "The site owner denied the authorization request");
+      if (pending.params.state !== undefined) {
+        target.searchParams.set("state", pending.params.state);
+      }
+      res.redirect(302, target.toString());
+      return;
+    }
+
+    if (decision !== "approve") {
+      res.status(400).type("html").send(renderErrorPage("Choose approve or deny to continue."));
+      return;
+    }
+
+    if (!(await verifyOwnerCredential(ownerCredential, this.ownerCredentialHash))) {
+      res.status(403).type("html").send(
+        renderConsentPage(approvalId, pending.client, pending.params, "The site-owner credential is invalid."),
+      );
+      return;
+    }
+
+    this.pendingAuthorizations.delete(approvalId);
+    const code = randomUUID();
+    await this.store.saveAuthCode(code, {
+      client: pending.client,
+      params: pending.params,
       createdAt: Date.now(),
     });
 
-    const target = new URL(params.redirectUri);
+    const target = new URL(pending.params.redirectUri);
     target.searchParams.set("code", code);
-    if (params.state !== undefined) {
-      target.searchParams.set("state", params.state);
+    if (pending.params.state !== undefined) {
+      target.searchParams.set("state", pending.params.state);
     }
 
-    res.redirect(target.toString());
+    res.redirect(302, target.toString());
   }
 
   async challengeForAuthorizationCode(_client: OAuthClientInformationFull, authorizationCode: string): Promise<string> {
@@ -242,6 +325,14 @@ export class WordPressOAuthProvider implements OAuthServerProvider {
       scope: scopes.join(" "),
     };
   }
+
+  private prunePendingAuthorizations(now: number): void {
+    for (const [approvalId, pending] of this.pendingAuthorizations) {
+      if (pending.expiresAt <= now) {
+        this.pendingAuthorizations.delete(approvalId);
+      }
+    }
+  }
 }
 
 export function createOAuthProvider(options: {
@@ -251,6 +342,7 @@ export function createOAuthProvider(options: {
   refreshTtlSeconds?: number;
   refreshGraceSeconds?: number;
   clientRetentionMs?: number;
+  ownerCredentialHash?: string;
 }): WordPressOAuthProvider {
   const store = new FileOAuthStore(options.dataDir, { clientRetentionMs: options.clientRetentionMs });
 
@@ -260,5 +352,57 @@ export function createOAuthProvider(options: {
     options.tokenTtlSeconds,
     options.refreshTtlSeconds,
     options.refreshGraceSeconds,
+    options.ownerCredentialHash,
   );
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => {
+    switch (character) {
+      case "&": return "&amp;";
+      case "<": return "&lt;";
+      case ">": return "&gt;";
+      case '"': return "&quot;";
+      default: return "&#39;";
+    }
+  });
+}
+
+function renderConsentPage(
+  approvalId: string,
+  client: OAuthClientInformationFull,
+  params: AuthorizationParams,
+  error?: string,
+): string {
+  const clientName = escapeHtml(client.client_name || "(no name supplied)");
+  const clientId = escapeHtml(client.client_id);
+  const redirectUri = escapeHtml(String(params.redirectUri));
+  const scopes = escapeHtml((params.scopes?.length ? params.scopes : resolveScopes(undefined)).join(", "));
+  const escapedId = escapeHtml(approvalId);
+  const errorMarkup = error ? `<p role="alert">${escapeHtml(error)}</p>` : "";
+
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Approve MCP access</title></head>
+<body><main><h1>Approve MCP access</h1>${errorMarkup}
+<p>An application requests access to your WordPress site. Approve only if you recognize where it will be sent.</p>
+<dl>
+<dt>Redirect destination</dt><dd><strong><code>${redirectUri}</code></strong></dd>
+<dt>Client ID</dt><dd><strong><code>${clientId}</code></strong></dd>
+<dt>Client name (self-supplied, not verified)</dt><dd>${clientName}</dd>
+</dl>
+<p>Requested permissions: ${scopes}</p>
+<form method="post" action="/oauth/consent">
+<input type="hidden" name="approval_id" value="${escapedId}">
+<label for="owner-credential">Site-owner credential</label>
+<input id="owner-credential" name="owner_credential" type="password" autocomplete="current-password" required>
+<button type="submit" name="decision" value="approve">Approve</button>
+</form>
+<form method="post" action="/oauth/consent">
+<input type="hidden" name="approval_id" value="${escapedId}">
+<button type="submit" name="decision" value="deny">Deny</button>
+</form></main></body></html>`;
+}
+
+function renderErrorPage(error: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Authorization error</title></head><body><main><h1>Authorization error</h1><p role="alert">${escapeHtml(error)}</p></main></body></html>`;
 }

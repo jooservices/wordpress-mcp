@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { mcpSecret, mcpUrl, runE2E } from "./helpers.js";
+import { getE2EBearerToken, mcpUrl, runE2E } from "./helpers.js";
 
 async function post(sessionId: string | undefined, body: unknown): Promise<Response> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
-    Authorization: `Bearer ${mcpSecret}`,
+    Authorization: `Bearer ${await getE2EBearerToken()}`,
   };
   if (sessionId) {
     headers["mcp-session-id"] = sessionId;

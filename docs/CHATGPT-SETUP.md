@@ -56,6 +56,8 @@ make prod-tunnel
 
 By default, ChatGPT needs an OAuth token with `wordpress.read` for read actions and `wordpress.write` for write actions. This applies in Mixed mode too. The MCP tool list remains available before linking.
 
+When ChatGPT links the app via OAuth, the server displays the client and requested scopes, then requires the configured site-owner credential before issuing a code. A denied request returns an OAuth `access_denied` error.
+
 > See [OAUTH-EXPLAINED.md](OAUTH-EXPLAINED.md) for how MCP OAuth scopes and WordPress connection scopes differ.
 
 ## OAuth scopes

@@ -36,6 +36,29 @@ With ngrok tunnel (dev/testing only):
 make prod-tunnel
 ```
 
+### Site-owner OAuth approval
+
+`MCP_AUTH_MODE=mixed` and `MCP_AUTH_MODE=oauth` require `MCP_OAUTH_OWNER_PASSWORD_HASH`. Authorization requests show the client and requested scopes; a code is issued only after the owner approves with the matching credential. Invalid credentials are rejected, denied requests return `access_denied`, and consent submissions are rate limited.
+
+Generate a hash without putting the plain credential in shell history, then copy the output into `.env.prod`:
+
+```bash
+read -r -s -p "Site-owner credential: " OWNER_PASSWORD
+printf '\n'
+MCP_OAUTH_OWNER_PASSWORD_HASH="$(printf '%s' "$OWNER_PASSWORD" | python3 -c '
+import base64, hashlib, os, sys
+password = sys.stdin.buffer.read()
+salt = os.urandom(16)
+digest = hashlib.scrypt(password, salt=salt, n=16384, r=8, p=1, dklen=64)
+encode = lambda value: base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+print("$".join(("scrypt", "16384", "8", "1", encode(salt), encode(digest))))
+')"
+unset OWNER_PASSWORD
+printf "MCP_OAUTH_OWNER_PASSWORD_HASH='%s'\n" "$MCP_OAUTH_OWNER_PASSWORD_HASH"
+```
+
+`make mcp-up` generates and stores this hash when mixed or OAuth mode is selected. The server rejects an absent or malformed hash at startup, so OAuth cannot silently return to automatic approval.
+
 ### Optional profile variables
 
 Docker Compose reads the whole `docker-compose.prod.yml` file even when a profile is inactive. **`MCP_DOMAIN`, `ACME_EMAIL`, and `NGROK_AUTHTOKEN` are not required for plain `make prod-up`.** Set them only when you use the matching `make` target.
@@ -59,6 +82,7 @@ docker run -d \
   -e WORDPRESS_CONNECTION_TOKEN=... \
   -e MCP_PUBLIC_URL=https://mcp.example.com \
   -e MCP_AUTH_MODE=mixed \
+  -e MCP_OAUTH_OWNER_PASSWORD_HASH='scrypt$16384$8$1$…' \
   wordpress-mcp:latest
 ```
 
@@ -70,6 +94,7 @@ docker run -d \
   -e 'WORDPRESS_SITES=[{"id":"blog-a","name":"Blog A","url":"https://a.example.com","token":"..."},{"id":"blog-b","name":"Blog B","url":"https://b.example.com","token":"..."}]' \
   -e MCP_PUBLIC_URL=https://mcp.example.com \
   -e MCP_AUTH_MODE=mixed \
+  -e MCP_OAUTH_OWNER_PASSWORD_HASH='scrypt$16384$8$1$…' \
   wordpress-mcp:latest
 ```
 
@@ -87,6 +112,7 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_PUBLIC_URL` | Yes** | Public HTTPS URL of this MCP server (required for Mixed/OAuth) |
 | `MCP_AUTH_MODE` | No | `mixed` (default), `oauth`, `static`, or `none` |
 | `MCP_AUTH_SECRET` | Yes*** | Bearer token for MCP clients (only when `MCP_AUTH_MODE=static`) |
+| `MCP_OAUTH_OWNER_PASSWORD_HASH` | Yes**** | Scrypt hash of the site-owner credential (required for `mixed` or `oauth`; never store the plain credential) |
 | `MCP_AUTH_DISABLED` | No | Default `false`. Dev-only when ChatGPT uses No Auth |
 | `OAUTH_ISSUER_URL` | No | Defaults to `MCP_PUBLIC_URL` origin |
 | `OAUTH_TOKEN_TTL_SECONDS` | No | Default `3600` (access token; ChatGPT auto-refreshes) |
@@ -112,12 +138,14 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_OAUTH_TOKEN_WINDOW_MS` | No | Token window in ms (default `900000` = 15 min) |
 | `MCP_OAUTH_AUTHORIZE_MAX` | No | Max authorize requests per window (default `100`) |
 | `MCP_OAUTH_AUTHORIZE_WINDOW_MS` | No | Authorize window in ms (default `900000` = 15 min) |
+| `MCP_OAUTH_CONSENT_MAX` | No | Site-owner credential submissions per client IP (default `5`) |
+| `MCP_OAUTH_CONSENT_WINDOW_MS` | No | Consent submission window in ms (default `900000` = 15 min) |
 | `MCP_OAUTH_REVOKE_MAX` | No | Max revoke requests per window (default `50`) |
 | `MCP_OAUTH_REVOKE_WINDOW_MS` | No | Revoke window in ms (default `900000` = 15 min) |
-| `MCP_TRUST_PROXY` | No | Default `1`. Trust `X-Forwarded-For` for OAuth rate limits behind reverse proxies |
-| `MCP_DOMAIN` | No**** | Public hostname for `make prod-https` (Caddy/Let's Encrypt) |
-| `ACME_EMAIL` | No**** | Let's Encrypt contact email for `make prod-https` |
-| `NGROK_AUTHTOKEN` | No***** | ngrok token for `make prod-tunnel` only |
+| `MCP_TRUST_PROXY` | No | Default disabled. Set a positive proxy hop count (for example, `1`) or a comma-separated list of proxy IP addresses/CIDRs (for example, `10.0.0.0/8,2001:db8::1/128`). Set `0`, `false`, or `no` to disable; blanket `true` is rejected. |
+| `MCP_DOMAIN` | No***** | Public hostname for `make prod-https` (Caddy/Let's Encrypt) |
+| `ACME_EMAIL` | No***** | Let's Encrypt contact email for `make prod-https` |
+| `NGROK_AUTHTOKEN` | No****** | ngrok token for `make prod-tunnel` only |
 
 \* Set either `WORDPRESS_SITES` **or** `WORDPRESS_URL` + `WORDPRESS_CONNECTION_TOKEN`.
 
@@ -125,9 +153,11 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 
 \*** Required when `MCP_AUTH_MODE` is `static`.
 
-\**** Required when running `make prod-https` (not required for `make prod-up` behind your own reverse proxy).
+\**** Required when `MCP_AUTH_MODE` is `mixed` or `oauth`.
 
-\***** Required when running `make prod-tunnel`.
+\***** Required when running `make prod-https` (not required for `make prod-up` behind your own reverse proxy).
+
+\****** Required when running `make prod-tunnel`.
 
 ## WordPress
 
@@ -155,6 +185,7 @@ Production WordPress may use a supported MariaDB or MySQL version. The dev stack
 
 - [ ] `MCP_AUTH_DISABLED=false` on public URLs
 - [ ] `MCP_AUTH_MODE=mixed` or `oauth` for production ChatGPT connectors
+- [ ] `MCP_OAUTH_OWNER_PASSWORD_HASH` is set and the plain credential is not stored in `.env.prod`
 - [ ] HTTPS termination in front of MCP
 - [ ] Rotate connection tokens if compromised
 - [ ] Minimal scopes on WordPress connections per site

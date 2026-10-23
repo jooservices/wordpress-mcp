@@ -1,5 +1,6 @@
 import type { Express, RequestHandler } from "express";
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import {
   createOAuthMetadata,
   getOAuthProtectedResourceMetadataUrl,
@@ -47,6 +48,7 @@ export function setupOAuth(app: Express, config: Config): OAuthRuntime {
     refreshTtlSeconds: config.oauthRefreshTtlSeconds,
     refreshGraceSeconds: config.oauthRefreshGraceSeconds,
     clientRetentionMs: config.oauthClientRetentionMs,
+    ownerCredentialHash: config.oauthOwnerPasswordHash,
   });
   const oauthMetadata = createOAuthMetadata({
     provider,
@@ -57,6 +59,32 @@ export function setupOAuth(app: Express, config: Config): OAuthRuntime {
   oauthMetadata.introspection_endpoint = new URL("/oauth/introspect", issuerUrl).href;
 
   const oauthRateLimit = config.oauthRateLimit;
+
+  const consentRateLimit = buildOAuthRateLimitOptions(oauthRateLimit, "consent");
+  const consentRateLimitMiddleware = consentRateLimit === false
+    ? undefined
+    : rateLimit({
+        standardHeaders: true,
+        legacyHeaders: false,
+        message: { error: "too_many_requests", error_description: "Too many site-owner approval attempts" },
+        ...consentRateLimit,
+      });
+
+  app.post(
+    "/oauth/consent",
+    express.urlencoded({ extended: false, limit: "8kb" }),
+    ...(consentRateLimitMiddleware ? [consentRateLimitMiddleware] : []),
+    (req, res) => {
+      const approvalId = typeof req.body?.approval_id === "string" ? req.body.approval_id : "";
+      const decision = typeof req.body?.decision === "string" ? req.body.decision : "";
+      const ownerCredential = typeof req.body?.owner_credential === "string" ? req.body.owner_credential : "";
+      void provider.completeAuthorization(approvalId, decision, ownerCredential, res).catch(() => {
+        if (!res.headersSent) {
+          res.status(500).type("html").send("<!doctype html><html><body><h1>Authorization error</h1><p>Unable to complete the authorization request.</p></body></html>");
+        }
+      });
+    },
+  );
 
   app.use(
     mcpAuthRouter({

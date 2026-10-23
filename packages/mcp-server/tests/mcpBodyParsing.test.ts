@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import pkceChallenge from "pkce-challenge";
 import { afterEach, describe, expect, it } from "vitest";
+import { TEST_OWNER_PASSWORD, TEST_OWNER_PASSWORD_HASH } from "./oauthFixtures.js";
 
 type RunningServer = {
   child: ChildProcess;
@@ -46,6 +47,8 @@ async function startServer(
       MCP_AUTH_MODE: authMode,
       MCP_AUTH_SECRET: "body-test-static-secret",
       MCP_PUBLIC_URL: authMode === "mixed" || authMode === "oauth" ? baseUrl : "",
+      MCP_OAUTH_OWNER_PASSWORD_HASH:
+        authMode === "mixed" || authMode === "oauth" ? TEST_OWNER_PASSWORD_HASH : "",
       OAUTH_ISSUER_URL: "",
       OAUTH_DATA_DIR: oauthDataDir,
       MCP_HOST: "127.0.0.1",
@@ -155,8 +158,21 @@ async function issueOAuthAccessToken(server: RunningServer, scope: string): Prom
     resource,
   });
   const authorization = await fetch(server.baseUrl + "/authorize?" + authorizeParams, { redirect: "manual" });
-  expect(authorization.status).toBe(302);
-  const code = new URL(authorization.headers.get("location") ?? "").searchParams.get("code");
+  expect(authorization.status).toBe(200);
+  const approvalId = (await authorization.text()).match(/name="approval_id" value="([^"]+)"/)?.[1];
+  expect(approvalId).toBeTruthy();
+  const approval = await fetch(server.baseUrl + "/oauth/consent", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      approval_id: approvalId!,
+      decision: "approve",
+      owner_credential: TEST_OWNER_PASSWORD,
+    }),
+    redirect: "manual",
+  });
+  expect(approval.status).toBe(302);
+  const code = new URL(approval.headers.get("location") ?? "").searchParams.get("code");
   expect(code).toBeTruthy();
 
   const tokenResponse = await fetch(server.baseUrl + "/token", {
@@ -270,8 +286,23 @@ describe("MCP body parsing and authentication order", () => {
       resource,
     });
     const authorization = await fetch(server.baseUrl + "/authorize?" + authorizeParams, { redirect: "manual" });
-    expect(authorization.status).toBe(302);
-    const code = new URL(authorization.headers.get("location") ?? "").searchParams.get("code");
+    expect(authorization.status).toBe(200);
+    const consentPage = await authorization.text();
+    const approvalId = consentPage.match(/name="approval_id" value="([^"]+)"/)?.[1];
+    expect(approvalId).toBeTruthy();
+
+    const approval = await fetch(server.baseUrl + "/oauth/consent", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        approval_id: approvalId!,
+        decision: "approve",
+        owner_credential: TEST_OWNER_PASSWORD,
+      }),
+      redirect: "manual",
+    });
+    expect(approval.status).toBe(302);
+    const code = new URL(approval.headers.get("location") ?? "").searchParams.get("code");
     expect(code).toBeTruthy();
 
     const tokenResponse = await fetch(server.baseUrl + "/token", {

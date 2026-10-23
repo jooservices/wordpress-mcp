@@ -1,8 +1,10 @@
+import { isIP } from "node:net";
 import type { OAuthRateLimitConfig } from "./auth/oauthRateLimit.js";
 import type { AuthMode } from "./auth/types.js";
 import type { ProtocolVersionPolicy } from "./mcp/versionNegotiator.js";
 import { loadWordPressSites } from "./sites/loadSites.js";
 import type { WordPressSiteConfig } from "./sites/types.js";
+import { isOwnerCredentialHash } from "./auth/ownerCredential.js";
 
 export interface Config {
   sites: WordPressSiteConfig[];
@@ -16,8 +18,9 @@ export interface Config {
   oauthRefreshGraceSeconds: number;
   oauthClientRetentionMs: number;
   oauthDataDir: string;
+  oauthOwnerPasswordHash: string;
   oauthRateLimit: OAuthRateLimitConfig;
-  trustProxy: boolean;
+  trustProxy: false | number | string[];
   port: number;
   host: string;
   mcpDisabledTools: Set<string>;
@@ -83,6 +86,60 @@ function parseBoolean(raw: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function parseTrustProxy(raw: string | undefined): false | number | string[] {
+  const value = raw?.trim();
+  if (!value) {
+    return false;
+  }
+
+  const normalized = value.toLowerCase();
+  if (normalized === "0" || normalized === "false" || normalized === "no") {
+    return false;
+  }
+  if (normalized === "true" || normalized === "yes") {
+    throw new Error(
+      "Invalid MCP_TRUST_PROXY (use an explicit proxy hop count or comma-separated proxy IP/CIDR addresses)",
+    );
+  }
+
+  if (/^\d+$/.test(value)) {
+    const hops = Number(value);
+    if (Number.isSafeInteger(hops) && hops > 0) {
+      return hops;
+    }
+    throw new Error("Invalid MCP_TRUST_PROXY (hop count must be a positive safe integer)");
+  }
+
+  const addresses = value.split(",").map((address) => address.trim());
+  const isAddressOrCidr = (address: string): boolean => {
+    const parts = address.split("/");
+    const version = isIP(parts[0] ?? "");
+    if (parts.length > 2 || version === 0) {
+      return false;
+    }
+    if (parts.length === 1) {
+      return true;
+    }
+
+    const prefix = Number(parts[1]);
+    const maxPrefix = version === 4 ? 32 : 128;
+    return (
+      /^\d+$/.test(parts[1] ?? "") &&
+      Number.isInteger(prefix) &&
+      prefix >= 0 &&
+      prefix <= maxPrefix
+    );
+  };
+
+  if (addresses.length === 0 || addresses.some((address) => !isAddressOrCidr(address))) {
+    throw new Error(
+      "Invalid MCP_TRUST_PROXY (use an explicit proxy hop count or comma-separated proxy IP/CIDR addresses)",
+    );
+  }
+
+  return addresses;
+}
+
 function parseOAuthRateLimit(): OAuthRateLimitConfig {
   return {
     enabled: parseBoolean(process.env.MCP_OAUTH_RATE_LIMIT_ENABLED, true),
@@ -97,6 +154,10 @@ function parseOAuthRateLimit(): OAuthRateLimitConfig {
     authorize: {
       max: parsePositiveInt(process.env.MCP_OAUTH_AUTHORIZE_MAX, 100),
       windowMs: parsePositiveInt(process.env.MCP_OAUTH_AUTHORIZE_WINDOW_MS, 15 * 60 * 1000),
+    },
+    consent: {
+      max: parsePositiveInt(process.env.MCP_OAUTH_CONSENT_MAX, 5),
+      windowMs: parsePositiveInt(process.env.MCP_OAUTH_CONSENT_WINDOW_MS, 15 * 60 * 1000),
     },
     revoke: {
       max: parsePositiveInt(process.env.MCP_OAUTH_REVOKE_MAX, 50),
@@ -113,6 +174,7 @@ export function loadConfig(): Config {
   const mcpAuthSecret = process.env.MCP_AUTH_SECRET ?? "";
   const mcpPublicUrl = process.env.MCP_PUBLIC_URL?.replace(/\/$/, "") ?? "";
   const oauthIssuerUrl = process.env.OAUTH_ISSUER_URL?.replace(/\/$/, "") ?? mcpPublicUrl;
+  const oauthOwnerPasswordHash = process.env.MCP_OAUTH_OWNER_PASSWORD_HASH ?? "";
 
   if (mcpAuthMode === "static" && !mcpAuthSecret) {
     throw new Error("Missing required env: MCP_AUTH_SECRET (MCP_AUTH_MODE=static)");
@@ -120,6 +182,13 @@ export function loadConfig(): Config {
 
   if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && !mcpPublicUrl) {
     throw new Error("Missing required env: MCP_PUBLIC_URL (required for OAuth/Mixed auth)");
+  }
+
+  if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && !oauthOwnerPasswordHash) {
+    throw new Error("Missing required env: MCP_OAUTH_OWNER_PASSWORD_HASH (required for OAuth/Mixed auth)");
+  }
+  if ((mcpAuthMode === "mixed" || mcpAuthMode === "oauth") && !isOwnerCredentialHash(oauthOwnerPasswordHash)) {
+    throw new Error("Invalid MCP_OAUTH_OWNER_PASSWORD_HASH (expected a scrypt hash)");
   }
 
   return {
@@ -134,8 +203,9 @@ export function loadConfig(): Config {
     oauthRefreshGraceSeconds: parsePositiveInt(process.env.OAUTH_REFRESH_GRACE_SECONDS, 120),
     oauthClientRetentionMs: parsePositiveInt(process.env.OAUTH_CLIENT_RETENTION_DAYS, 7) * 24 * 60 * 60 * 1000,
     oauthDataDir: process.env.OAUTH_DATA_DIR ?? "/app/data/oauth",
+    oauthOwnerPasswordHash,
     oauthRateLimit: parseOAuthRateLimit(),
-    trustProxy: parseBoolean(process.env.MCP_TRUST_PROXY, true),
+    trustProxy: parseTrustProxy(process.env.MCP_TRUST_PROXY),
     port: Number(process.env.MCP_PORT ?? 3000),
     host: process.env.MCP_HOST ?? "0.0.0.0",
     mcpDisabledTools: parseDisabledTools(process.env.MCP_DISABLED_TOOLS),

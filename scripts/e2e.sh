@@ -6,8 +6,9 @@ cd "$ROOT"
 
 COMPOSE="${DOCKER_COMPOSE:-docker compose}"
 FULL="${E2E_FULL:-0}"
-OAUTH_ENABLED=0
-OAUTH_MODE=static
+OAUTH_ENABLED=1
+OAUTH_MODE=mixed
+OAUTH_OWNER_HASH='scrypt$16384$8$1$MDEyMzQ1Njc4OWFiY2RlZg$AE1pcNqO6pZV5cWg72ByWXcAUXnvywEEPP5B9iuWUcTgiUvquAt-XYhVUgxMOQ-LUKSbtuvx7RFmseUBWrriGg'
 WORDPRESS_PHP_VERSION="${WORDPRESS_PHP_VERSION:-8.5}"
 if [ -z "${PHP_IMAGE_VERSION:-}" ]; then
   PHP_IMAGE_VERSION="$WORDPRESS_PHP_VERSION"
@@ -65,9 +66,12 @@ export DISABLE_WP_CRON=1
 export RUN_E2E=1
 if [ "$FULL" = "1" ]; then
   export RUN_E2E_FULL=1
-  OAUTH_ENABLED=1
-  OAUTH_MODE=mixed
 fi
+export MCP_PUBLIC_URL=http://mcp:3000
+export MCP_OAUTH_OWNER_PASSWORD_HASH="$OAUTH_OWNER_HASH"
+export MCP_DANGEROUSLY_ALLOW_INSECURE_ISSUER_URL=1
+export MCP_OAUTH_CONSENT_MAX=100
+export MCP_AUTH_MODE="$OAUTH_MODE"
 
 echo "==> Building images"
 compose build php mcp
@@ -124,7 +128,7 @@ compose --profile e2e run --rm \
   -e RUN_E2E_FULL="${RUN_E2E_FULL:-}" \
   -e RUN_E2E_OAUTH="$OAUTH_ENABLED" \
   -e MCP_AUTH_MODE="$OAUTH_MODE" \
-  -e MCP_PUBLIC_URL=http://mcp:3000 \
+  -e MCP_PUBLIC_URL="${MCP_PUBLIC_URL:-http://mcp:3000}" \
   e2e
 
 if [ "$FULL" = "1" ]; then

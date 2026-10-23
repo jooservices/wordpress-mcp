@@ -13,8 +13,11 @@ This is the **sign-in / account linking** step between **ChatGPT** and your **MC
 
 **Mixed mode (recommended):**
 
-- Read: ChatGPT can use it right away, no sign-in required.
-- Write: ChatGPT will ask you to **link the app (OAuth)** the first time it performs a write action.
+- OAuth authorization displays the requested scopes and waits for a site owner to approve it.
+- The owner enters the configured site-owner credential before the server issues any authorization code.
+- Write access is granted only when the owner approves the request with `wordpress.write` included.
+
+The owner credential is configured through `MCP_OAUTH_OWNER_PASSWORD_HASH` as a scrypt hash. See [Deployment](DEPLOYMENT.md#site-owner-oauth-approval) for setup instructions.
 
 OAuth does **not** let you pick individual fine-grained permissions (e.g. publish only, no delete). It only has 2 levels: read or write.
 
