@@ -61,6 +61,40 @@ describe("loadConfig oauth rate limit env", () => {
     expect(config.trustProxy).toBe(false);
   });
 
+  it("disables proxy trust by default and accepts explicit hops or proxy addresses", async () => {
+    process.env.WORDPRESS_URL = "http://wordpress";
+    process.env.WORDPRESS_CONNECTION_TOKEN = "test-token";
+    process.env.MCP_AUTH_MODE = "static";
+    process.env.MCP_AUTH_SECRET = "secret";
+    delete process.env.MCP_TRUST_PROXY;
+
+    const { loadConfig } = await import("../src/config.js");
+    expect(loadConfig().trustProxy).toBe(false);
+
+    process.env.MCP_TRUST_PROXY = "1";
+    expect(loadConfig().trustProxy).toBe(1);
+
+    process.env.MCP_TRUST_PROXY = "2";
+    expect(loadConfig().trustProxy).toBe(2);
+
+    process.env.MCP_TRUST_PROXY = "127.0.0.1,10.0.0.0/8,2001:db8::1/128";
+    expect(loadConfig().trustProxy).toEqual(["127.0.0.1", "10.0.0.0/8", "2001:db8::1/128"]);
+  });
+
+  it("rejects blanket and invalid proxy trust configuration", async () => {
+    process.env.WORDPRESS_URL = "http://wordpress";
+    process.env.WORDPRESS_CONNECTION_TOKEN = "test-token";
+    process.env.MCP_AUTH_MODE = "static";
+    process.env.MCP_AUTH_SECRET = "secret";
+
+    const { loadConfig } = await import("../src/config.js");
+    process.env.MCP_TRUST_PROXY = "true";
+    expect(() => loadConfig()).toThrow("Invalid MCP_TRUST_PROXY");
+
+    process.env.MCP_TRUST_PROXY = "proxy.example.com";
+    expect(() => loadConfig()).toThrow("Invalid MCP_TRUST_PROXY");
+  });
+
   it("requires a valid owner credential hash when OAuth is enabled", async () => {
     process.env.WORDPRESS_URL = "http://wordpress";
     process.env.WORDPRESS_CONNECTION_TOKEN = "test-token";

@@ -98,9 +98,7 @@ async function resolveSession(sessionId: string): Promise<StreamableHTTPServerTr
 }
 
 const app = express();
-if (config.trustProxy) {
-  app.set("trust proxy", true);
-}
+app.set("trust proxy", config.trustProxy);
 if (config.mcpAuthMode === "mixed" || config.mcpAuthMode === "oauth") {
   oauthRuntime = setupOAuth(app, config);
 }

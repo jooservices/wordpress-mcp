@@ -54,6 +54,7 @@ async function withOAuthServer(
     mcpSessionIdleMs: 1_800_000,
     mcpJsonBodyLimit: "100mb",
   };
+  app.set("trust proxy", config.trustProxy);
   const { provider } = setupOAuth(app, config);
 
   let server: Server | undefined;
@@ -281,9 +282,12 @@ describe("OAuth HTTP endpoints", () => {
 
     await withOAuthServer(dir, async (baseUrl) => {
       const { approvalId } = await beginAuthorization(baseUrl);
-      const submit = () => fetch(`${baseUrl}/oauth/consent`, {
+      const submit = (forwardedFor: string) => fetch(`${baseUrl}/oauth/consent`, {
         method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "x-forwarded-for": forwardedFor,
+        },
         body: new URLSearchParams({
           approval_id: approvalId,
           decision: "approve",
@@ -291,8 +295,8 @@ describe("OAuth HTTP endpoints", () => {
         }),
       });
 
-      expect((await submit()).status).toBe(403);
-      const limited = await submit();
+      expect((await submit("198.51.100.1")).status).toBe(403);
+      const limited = await submit("198.51.100.2");
       expect(limited.status).toBe(429);
       expect(limited.headers.get("ratelimit-limit")).toBe("1");
     }, 1);
