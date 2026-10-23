@@ -53,7 +53,6 @@ fi
 export E2E_SKIP_PUBLIC_URL=0
 export WP_INTERNAL_URL=http://wordpress
 export WORDPRESS_HOST_PORT="${WORDPRESS_HOST_PORT:-18080}"
-export WORDPRESS_CONFIG_EXTRA="define('DISABLE_WP_CRON', true);"
 export DISABLE_WP_CRON=1
 export RUN_PLUGIN_E2E=1
 export WORDPRESS_URL=http://wordpress

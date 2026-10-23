@@ -8,6 +8,9 @@ final class MediaStoredVerifier
 {
     public const VERIFIED_META_KEY = '_mcp_media_verified';
 
+    /** Loopback fetch timeout in seconds; filterable via `jooservices_mcp_public_url_timeout`. */
+    public const PUBLIC_URL_TIMEOUT_SECONDS = 5;
+
     /**
      * @return array{verification: array<string, mixed>, step: string|null}
      */
@@ -67,11 +70,10 @@ final class MediaStoredVerifier
         $verification['public_url_ok'] = $publicCheck['ok'];
         $verification['public_url_status'] = $publicCheck['status'];
 
-        if (! $publicCheck['ok']) {
-            $verification['failed_step'] = $publicCheck['step'];
-
-            return ['verification' => $verification, 'step' => $publicCheck['step']];
-        }
+        // Advisory: the loopback fetch depends on the site reaching itself over
+        // HTTP and on server speed, not on the stored file. A failure is
+        // reported as a warning and never fails the upload or deletes the file.
+        $verification['public_url_warning'] = $publicCheck['ok'] ? null : $publicCheck['step'];
 
         $verification['passed'] = true;
         $verification['failed_step'] = null;
@@ -139,7 +141,7 @@ final class MediaStoredVerifier
         }
 
         $response = wp_remote_get($url, [
-            'timeout' => 15,
+            'timeout' => max(1, (int) apply_filters('jooservices_mcp_public_url_timeout', self::PUBLIC_URL_TIMEOUT_SECONDS)),
             'redirection' => 3,
             'sslverify' => true,
         ]);

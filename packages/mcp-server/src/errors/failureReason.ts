@@ -28,6 +28,7 @@ const API_ERROR_REASONS: Record<string, FailureReasonValue> = {
   MEDIA_NOT_FOUND: FailureReason.NOT_FOUND,
   TERM_NOT_FOUND: FailureReason.NOT_FOUND,
   WORDPRESS_ERROR: FailureReason.WORDPRESS_ERROR,
+  MEDIA_UPLOAD_IN_PROGRESS: FailureReason.WORDPRESS_ERROR,
 };
 
 export function failureReasonFor(error: unknown): FailureReasonValue {

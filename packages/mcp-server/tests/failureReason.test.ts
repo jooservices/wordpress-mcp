@@ -25,6 +25,9 @@ describe("failureReasonFor", () => {
     expect(failureReasonFor(new WordPressApiError("POST_NOT_FOUND", "gone", 404))).toBe(
       FailureReason.NOT_FOUND,
     );
+    expect(failureReasonFor(new WordPressApiError("MEDIA_UPLOAD_IN_PROGRESS", "retry shortly", 409))).toBe(
+      FailureReason.WORDPRESS_ERROR,
+    );
   });
 
   it("falls back for unmapped errors", () => {

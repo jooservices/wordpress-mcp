@@ -89,6 +89,363 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function it_returns_the_existing_attachment_when_the_same_file_is_uploaded_again_for_the_same_post(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $path = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/replay-' . uniqid() . '.png';
+        $this->writeMinimalPng($path);
+
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $GLOBALS['wp_test_posts'] = [
+            70 => new \WP_Post(70, '', 'post'),
+            9100 => new \WP_Post(9100, '', 'attachment'),
+        ];
+        $GLOBALS['wp_test_posts'][9100]->post_status = 'inherit';
+        $GLOBALS['wp_test_attachment_files'][9100] = $path;
+        $GLOBALS['wp_test_attachment_urls'][9100] = 'https://example.test/wp-content/uploads/replay.png';
+        $GLOBALS['wp_test_attachment_mimes'][9100] = 'image/png';
+        $GLOBALS['wp_test_attachment_metadata'][9100] = ['width' => 1, 'height' => 1, 'sizes' => []];
+        $GLOBALS['wp_test_postmeta'][9100] = [
+            '_mcp_media_upload_sha256' => hash('sha256', $png),
+            '_mcp_media_upload_post_id' => '70',
+        ];
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'replay.png',
+            'content_base64' => base64_encode($png),
+            'post_id' => 70,
+            'set_featured' => true,
+        ]);
+
+        self::assertNull($result['error']);
+        self::assertSame(9100, $result['media']['id']);
+        self::assertTrue($result['media']['idempotent_replay']);
+        self::assertTrue($result['verification']['featured_set']);
+        self::assertSame(9100, $GLOBALS['wp_test_thumbnails'][70]);
+        self::assertCount(2, $GLOBALS['wp_test_posts'], 'A retry must not create a duplicate attachment.');
+
+        unlink($path);
+    }
+
+    #[Test]
+    public function it_returns_the_existing_attachment_when_the_same_file_is_retried_without_a_post(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $path = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/nopost-replay-' . uniqid() . '.png';
+        $this->writeMinimalPng($path);
+
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+        $GLOBALS['wp_test_posts'][9100] = new \WP_Post(9100, '', 'attachment');
+        $GLOBALS['wp_test_posts'][9100]->post_status = 'inherit';
+        $GLOBALS['wp_test_attachment_files'][9100] = $path;
+        $GLOBALS['wp_test_attachment_urls'][9100] = 'https://example.test/wp-content/uploads/nopost-replay.png';
+        $GLOBALS['wp_test_attachment_mimes'][9100] = 'image/png';
+        $GLOBALS['wp_test_attachment_metadata'][9100] = ['width' => 1, 'height' => 1, 'sizes' => []];
+        $GLOBALS['wp_test_postmeta'][9100] = [
+            '_mcp_media_upload_sha256' => hash('sha256', $png),
+            '_mcp_media_upload_post_id' => '0',
+        ];
+
+        $result = (new MediaService())->upload(['file_name' => 'nopost.png', 'content_base64' => base64_encode($png)]);
+
+        self::assertNull($result['error']);
+        self::assertSame(9100, $result['media']['id']);
+        self::assertTrue($result['media']['idempotent_replay']);
+        self::assertSame(0, $GLOBALS['wp_test_sideload_calls'], 'A retry without a post must reuse the stored attachment.');
+        self::assertCount(1, $GLOBALS['wp_test_posts'], 'A retry without a post must not create a duplicate attachment.');
+
+        unlink($path);
+    }
+
+    #[Test]
+    public function it_rejects_replay_when_the_stored_file_no_longer_matches_the_upload_key(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $chunkData = 'changed';
+        $chunk = pack('N', strlen($chunkData)) . 'tEXt' . $chunkData . pack('N', crc32('tEXt' . $chunkData));
+        $changedPng = substr($png, 0, -12) . $chunk . substr($png, -12);
+        $path = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/replay-mutated-' . uniqid() . '.png';
+        $this->writeMinimalPng($path);
+        file_put_contents($path, $changedPng);
+
+        $GLOBALS['wp_test_posts'][9100] = new \WP_Post(9100, '', 'attachment');
+        $GLOBALS['wp_test_posts'][9100]->post_status = 'inherit';
+        $GLOBALS['wp_test_attachment_files'][9100] = $path;
+        $GLOBALS['wp_test_attachment_urls'][9100] = 'https://example.test/wp-content/uploads/replay-mutated.png';
+        $GLOBALS['wp_test_attachment_mimes'][9100] = 'image/png';
+        $GLOBALS['wp_test_attachment_metadata'][9100] = ['width' => 1, 'height' => 1, 'sizes' => []];
+        $GLOBALS['wp_test_postmeta'][9100] = [
+            '_mcp_media_upload_sha256' => hash('sha256', $png),
+            '_mcp_media_upload_post_id' => '70',
+        ];
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'replay.png',
+            'content_base64' => base64_encode($png),
+            'post_id' => 70,
+        ]);
+
+        self::assertSame(ErrorCodes::MEDIA_VERIFY_FAILED, $result['error']);
+        self::assertSame('post_validate.sha256_mismatch', $result['error_step']);
+        self::assertFalse($result['verification']['sha256_match']);
+        self::assertNull($result['media']);
+        self::assertArrayHasKey(9100, $GLOBALS['wp_test_posts'], 'A replay checksum mismatch must not delete the stored attachment.');
+
+        unlink($path);
+    }
+
+    #[Test]
+    public function it_rejects_an_overlapping_retry_without_a_post_while_the_upload_key_is_reserved(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':0'), 0, 40);
+        $GLOBALS['wp_test_options'][$lockName] = (string) time();
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'racing.png',
+            'content_base64' => base64_encode($png),
+        ]);
+
+        self::assertNull($result['media']);
+        self::assertSame(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, $result['error']);
+        self::assertSame('upload.in_progress', $result['error_step']);
+        self::assertCount(0, $GLOBALS['wp_test_posts'], 'An overlapping retry must not create an attachment.');
+        self::assertArrayHasKey($lockName, $GLOBALS['wp_test_options'], 'The holder keeps its lock.');
+    }
+
+    #[Test]
+    public function it_takes_over_a_stale_upload_lock_and_releases_it_afterwards(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $GLOBALS['wp_test_options'][$lockName] = (string) (time() - 3600);
+
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+
+        $result = (new MediaService())->upload([
+            'file_name' => 'stale.png',
+            'post_id' => 70,
+            'content_base64' => base64_encode($png),
+        ]);
+
+        self::assertSame('upload.sideload', $result['error_step']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'A stale lock must not block the upload.');
+        self::assertArrayNotHasKey($lockName, $GLOBALS['wp_test_options']);
+    }
+
+    #[Test]
+    public function concurrent_stale_lock_contenders_allow_only_one_upload_to_claim_the_key(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $staleValue = (string) (time() - 3600);
+        $GLOBALS['wp_test_options'][$lockName] = $staleValue;
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+        $payload = ['file_name' => 'stale-race.png', 'post_id' => 70, 'content_base64' => base64_encode($png)];
+        $activeLockValue = 'second-owner|' . (time() + 300);
+        $contender = null;
+
+        // The outer request has already read the stale value when this hook
+        // starts a second retry. Keep the second retry's claimed lock in place
+        // to model it continuing through sideload while the first resumes.
+        $GLOBALS['wp_test_get_option_hook'] = static function (
+            string $name,
+            mixed $observedValue,
+        ) use ($lockName, $staleValue, $payload, $activeLockValue, &$contender): void {
+            if ($name !== $lockName || $observedValue !== $staleValue) {
+                return;
+            }
+
+            unset($GLOBALS['wp_test_get_option_hook']);
+            $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, $activeLockValue): void {
+                unset($GLOBALS['wp_test_sideload_hook']);
+                $GLOBALS['wp_test_options'][$lockName] = $activeLockValue;
+            };
+            $contender = (new MediaService())->upload($payload);
+        };
+
+        $outer = (new MediaService())->upload($payload);
+
+        self::assertIsArray($contender);
+        self::assertSame('upload.sideload', $contender['error_step']);
+        self::assertSame(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, $outer['error']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Only the stale-lock winner may sideload.');
+        self::assertSame($activeLockValue, $GLOBALS['wp_test_options'][$lockName]);
+    }
+
+    #[Test]
+    public function it_does_not_let_a_retry_take_over_the_lock_of_an_active_upload(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+        $GLOBALS['wp_test_sideload_calls'] = 0;
+
+        $payload = ['file_name' => 'active.png', 'post_id' => 70, 'content_base64' => base64_encode($png)];
+        $retry = null;
+        $GLOBALS['wp_test_sideload_hook'] = static function () use (&$retry, $payload): void {
+            // The first request is mid-sideload with its idempotency meta not stored yet.
+            $retry = (new MediaService())->upload($payload);
+        };
+
+        try {
+            (new MediaService())->upload($payload);
+        } finally {
+            unset($GLOBALS['wp_test_sideload_hook']);
+        }
+
+        self::assertSame(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, $retry['error']);
+        self::assertSame('upload.in_progress', $retry['error_step']);
+        self::assertSame(1, $GLOBALS['wp_test_sideload_calls'], 'Only one sideload may run.');
+    }
+
+    #[Test]
+    public function it_only_releases_a_lock_it_still_owns(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $foreign = 'other-owner|' . (time() + 300);
+        $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, $foreign): void {
+            // A takeover replaced the lock while this request was still running.
+            $GLOBALS['wp_test_options'][$lockName] = $foreign;
+        };
+
+        try {
+            (new MediaService())->upload(['file_name' => 'owner.png', 'post_id' => 70, 'content_base64' => base64_encode($png)]);
+        } finally {
+            unset($GLOBALS['wp_test_sideload_hook']);
+        }
+
+        self::assertSame($foreign, $GLOBALS['wp_test_options'][$lockName] ?? null, 'Another owner\'s lock must survive.');
+    }
+
+    #[Test]
+    public function a_request_that_loses_its_lock_during_metadata_generation_reconciles_to_a_real_retry(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $sha = hash('sha256', $png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', $sha . ':70'), 0, 40);
+        $GLOBALS['wp_test_posts'] = [70 => new \WP_Post(70, '', 'post')];
+        $GLOBALS['wp_test_deleted_attachments'] = [];
+        $GLOBALS['wp_test_sideload_creates'] = true;
+        $retryResult = null;
+        $payload = ['file_name' => 'slow.png', 'post_id' => 70, 'content_base64' => base64_encode($png)];
+        // Expire the first request's lease during metadata generation, then
+        // run a real retry that claims the stale lock and stores the key.
+        $GLOBALS['wp_test_metadata_hook'] = static function () use ($lockName, $payload, &$retryResult): void {
+            unset($GLOBALS['wp_test_metadata_hook']);
+            $GLOBALS['wp_test_options'][$lockName] = (string) (time() - 3600);
+            $retryResult = (new MediaService())->upload($payload);
+        };
+
+        try {
+            $result = (new MediaService())->upload($payload);
+        } finally {
+            unset($GLOBALS['wp_test_metadata_hook'], $GLOBALS['wp_test_sideload_creates']);
+        }
+
+        self::assertIsArray($retryResult);
+        self::assertNull($retryResult['error']);
+        $winnerId = (int) $retryResult['media']['id'];
+        self::assertNull($result['error']);
+        self::assertSame($winnerId, $result['media']['id']);
+        self::assertTrue($result['media']['idempotent_replay']);
+        self::assertCount(1, $GLOBALS['wp_test_deleted_attachments'], 'The stale request discards its own attachment.');
+        self::assertNotContains($winnerId, $GLOBALS['wp_test_deleted_attachments']);
+        $attachments = array_filter($GLOBALS['wp_test_posts'], static fn(mixed $p): bool => $p instanceof \WP_Post && $p->post_type === 'attachment');
+        self::assertCount(1, $attachments, 'Only the retry\'s attachment remains.');
+        self::assertArrayNotHasKey($lockName, $GLOBALS['wp_test_options'], 'The retry releases its lock.');
+
+        foreach ($GLOBALS['wp_test_attachment_files'] as $path) {
+            if (is_file($path)) {
+                unlink($path);
+            }
+        }
+    }
+
+    #[Test]
+    public function it_sizes_the_lock_lease_to_outlast_the_php_execution_limit(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $seen = null;
+        $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, &$seen): void {
+            $seen = (int) explode('|', (string) $GLOBALS['wp_test_options'][$lockName], 2)[1];
+        };
+        $previous = ini_set('max_execution_time', '900');
+
+        try {
+            (new MediaService())->upload(['file_name' => 'lease.png', 'post_id' => 70, 'content_base64' => base64_encode($png)]);
+        } finally {
+            unset($GLOBALS['wp_test_sideload_hook']);
+            ini_set('max_execution_time', (string) $previous);
+        }
+
+        self::assertNotNull($seen);
+        self::assertGreaterThanOrEqual(time() + 900, $seen);
+    }
+
+    #[Test]
+    public function it_keeps_the_media_and_reports_when_setting_the_featured_image_fails(): void
+    {
+        $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';
+        $relative = '2025/01/featured-' . uniqid() . '.png';
+        $this->writeMinimalPng($basedir . '/' . $relative);
+
+        $GLOBALS['wp_test_posts'][70] = new \WP_Post(70, '', 'post');
+        $GLOBALS['wp_test_set_thumbnail_fails'] = true;
+        $GLOBALS['wp_test_options']['jooservices_mcp_media_orphans'] = [
+            'scanned_at' => '2026-01-01T00:00:00+00:00',
+            'broken_attachments' => [],
+            'orphan_files' => ['items' => [['path' => $relative, 'url' => null]], 'truncated' => false],
+        ];
+
+        try {
+            $result = (new MediaService())->adoptOrphan([
+                'path' => $relative,
+                'post_id' => 70,
+                'set_featured' => true,
+            ]);
+        } finally {
+            unset($GLOBALS['wp_test_set_thumbnail_fails']);
+        }
+
+        self::assertNull($result['error']);
+        self::assertNotNull($result['media']);
+        self::assertTrue($result['verification']['passed']);
+        self::assertFalse($result['verification']['featured_set']);
+        self::assertSame(ErrorCodes::WORDPRESS_ERROR, $result['verification']['featured_error']);
+        self::assertSame('featured.set_failed', $result['verification']['featured_step']);
+        self::assertArrayHasKey((int) $result['media']['id'], $GLOBALS['wp_test_posts']);
+    }
+
+    #[Test]
     public function it_rejects_adopt_without_path_or_url(): void
     {
         $service = new MediaService();

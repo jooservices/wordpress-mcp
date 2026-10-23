@@ -89,7 +89,10 @@ export type MediaVerificationDto = {
   metadata_generated?: boolean;
   public_url_ok?: boolean | null;
   public_url_status?: number | null;
+  public_url_warning?: string | null;
   featured_set?: boolean;
+  featured_error?: string | null;
+  featured_step?: string | null;
   failed_step?: string | null;
 };
 
@@ -106,6 +109,7 @@ export type MediaDto = {
   caption?: string;
   description?: string;
   verified?: boolean;
+  idempotent_replay?: boolean;
   verification?: MediaVerificationDto;
 };
 
@@ -279,7 +283,7 @@ const PROTOCOL_FIELDS: Record<DtoKind, ReadonlySet<string>> = {
   ]),
   comment: new Set(["id", "post_id", "parent_id", "author", "content", "status", "created_at"]),
   term: new Set(["id", "name", "slug", "taxonomy"]),
-  media: new Set(["id", "title", "url", "mime_type", "file_name", "slug_base", "image_type", "created_at", "alt_text", "caption", "description", "verified", "verification"]),
+  media: new Set(["id", "title", "url", "mime_type", "file_name", "slug_base", "image_type", "created_at", "alt_text", "caption", "description", "verified", "idempotent_replay", "verification"]),
   plugin: new Set(["plugin", "name", "version", "active", "update_available"]),
   theme: new Set(["stylesheet", "name", "version", "active", "update_available"]),
   user: new Set(["id", "login", "email", "display_name", "roles", "registered_at"]),
@@ -304,7 +308,10 @@ const MEDIA_VERIFICATION_FIELDS = new Set([
   "metadata_generated",
   "public_url_ok",
   "public_url_status",
+  "public_url_warning",
   "featured_set",
+  "featured_error",
+  "featured_step",
   "failed_step",
 ]);
 

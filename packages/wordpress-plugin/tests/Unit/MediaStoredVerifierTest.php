@@ -100,6 +100,20 @@ final class MediaStoredVerifierTest extends TestCase
     }
 
     #[Test]
+    public function it_treats_a_failing_public_url_check_as_advisory(): void
+    {
+        add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => false);
+        $GLOBALS['wp_test_remote_get']['https://example.test/wp-content/uploads/test.png'] = 'not-an-image';
+
+        $result = MediaStoredVerifier::verifyAttachment(501, hash('sha256', $this->pngBytes));
+
+        self::assertNull($result['step']);
+        self::assertTrue($result['verification']['passed']);
+        self::assertFalse($result['verification']['public_url_ok']);
+        self::assertSame('public_url.decode', $result['verification']['public_url_warning']);
+    }
+
+    #[Test]
     public function it_verifies_the_original_file_when_wordpress_made_a_scaled_copy(): void
     {
         add_filter('jooservices_mcp_skip_public_url_verify', static fn(): bool => true);

@@ -3,7 +3,7 @@ import { McpSession, runE2EFull } from "./helpers.js";
 
 const ORPHAN_PATH = "e2e/e2e-orphan.png";
 
-describe.skipIf(!runE2EFull)("e2e media orphan recovery", () => {
+describe.skipIf(!runE2EFull)("e2e media orphan recovery", { timeout: 180_000 }, () => {
   const session = new McpSession();
   let adoptedId = 0;
 

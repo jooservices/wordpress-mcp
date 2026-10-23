@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureBase64, McpSession, runE2EFull, textOf } from "./helpers.js";
+import { fixtureBase64, McpSession, runE2EFull, textOf, uniquePngBase64 } from "./helpers.js";
 
-describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
+// Each test uploads real images (subsizes + loopback URL check) and often replays
+// or reads them back; vitest's 5 s default is too tight for a CI WordPress.
+describe.skipIf(!runE2EFull)("e2e media upload and verification", { timeout: 180_000 }, () => {
   const session = new McpSession();
   const stamp = Date.now();
   const createdIds: number[] = [];
@@ -21,13 +23,14 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     await session.close();
   });
 
-  it("uploads a 320px PNG with public URL verification", async () => {
-    const uploaded = await session.expectSuccess("wordpress_upload_media", {
+  it("uploads a 320px PNG with public URL verification and safely replays a no-post retry", async () => {
+    const args = {
       title: `E2E small ${stamp}`,
       image_type: "inline",
-      content_base64: fixtureBase64("e2e-small.png"),
+      content_base64: uniquePngBase64(),
       alt_text: `Small ${stamp}`,
-    });
+    };
+    const uploaded = await session.expectSuccess("wordpress_upload_media", args);
     const id = Number(uploaded.structuredContent?.id);
     expect(id).toBeGreaterThan(0);
     createdIds.push(id);
@@ -38,6 +41,10 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     expect(verification?.passed, `small upload verification: ${JSON.stringify(verification)}`).toBe(true);
     expect(verification?.public_url_ok).toBe(true);
     expect(verification?.sha256_match).toBe(true);
+
+    const retry = await session.expectSuccess("wordpress_upload_media", args);
+    expect(Number(retry.structuredContent?.id)).toBe(id);
+    expect(retry.structuredContent?.idempotent_replay).toBe(true);
 
     const fetched = await session.expectSuccess("wordpress_get_media", { id, verify: true });
     expect((fetched.structuredContent?.verification as { passed?: boolean } | undefined)?.passed).toBe(true);
@@ -91,6 +98,90 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     });
     const step = result.structuredContent?.verification_step;
     expect(String(step ?? textOf(result))).toMatch(/pre_validate\./);
+  });
+
+  it("returns the existing attachment when the same upload is retried for the same post", async () => {
+    const post = await session.expectSuccess("wordpress_create_content", {
+      type: "post",
+      title: `E2E idempotent ${stamp}`,
+      content: "<p>idempotent</p>",
+      status: "draft",
+    });
+    const postId = Number(post.structuredContent?.id);
+    const args = {
+      title: `E2E idempotent ${stamp}`,
+      image_type: "inline",
+      content_base64: uniquePngBase64(),
+      post_id: postId,
+      set_featured: true,
+    };
+
+    try {
+      const first = await session.expectSuccess("wordpress_upload_media", args);
+      const firstId = Number(first.structuredContent?.id);
+      createdIds.push(firstId);
+
+      const retry = await session.expectSuccess("wordpress_upload_media", args);
+      expect(Number(retry.structuredContent?.id)).toBe(firstId);
+      expect(retry.structuredContent?.idempotent_replay).toBe(true);
+      expect((retry.structuredContent?.verification as { featured_set?: boolean } | undefined)?.featured_set).toBe(true);
+    } finally {
+      await session.call("wordpress_delete_content", { id: postId, force: true, confirm: true });
+    }
+  });
+
+  it("keeps an upload retrievable and reports featured_error when its post was deleted", async () => {
+    let deletedPostId = 0;
+    let postWasDeleted = false;
+
+    try {
+      const post = await session.expectSuccess("wordpress_create_content", {
+        type: "post",
+        title: `E2E deleted featured target ${stamp}`,
+        content: "The target will be deleted before setting the featured image.",
+        status: "draft",
+      });
+      deletedPostId = Number(post.structuredContent?.id);
+      expect(deletedPostId).toBeGreaterThan(0);
+
+      const deleted = await session.expectSuccess("wordpress_delete_content", {
+        id: deletedPostId,
+        force: true,
+        confirm: true,
+      });
+      postWasDeleted = true;
+      expect(deleted.isError ?? false).toBe(false);
+
+      const uploaded = await session.call("wordpress_upload_media", {
+        title: `E2E retained after featured failure ${stamp}`,
+        image_type: "inline",
+        content_base64: fixtureBase64("e2e-small.png"),
+        post_id: deletedPostId,
+        set_featured: true,
+      });
+
+      expect(uploaded.isError ?? false, `upload failed: ${textOf(uploaded)}`).toBe(false);
+      const id = Number(uploaded.structuredContent?.id);
+      expect(id).toBeGreaterThan(0);
+      createdIds.push(id);
+
+      const verification = uploaded.structuredContent?.verification as
+        | { passed?: boolean; featured_set?: boolean; featured_error?: string | null; featured_step?: string | null }
+        | undefined;
+      expect(verification?.passed).toBe(true);
+      expect(verification?.featured_set).toBe(false);
+      expect(verification?.featured_error).toBe("POST_NOT_FOUND");
+      expect(verification?.featured_step).toBe("featured.post_not_found");
+      expect(textOf(uploaded)).toMatch(/Partial success/i);
+
+      const stored = await session.expectSuccess("wordpress_get_media", { id, verify: true });
+      expect(Number(stored.structuredContent?.id)).toBe(id);
+      expect((stored.structuredContent?.verification as { passed?: boolean } | undefined)?.passed).toBe(true);
+    } finally {
+      if (deletedPostId > 0 && !postWasDeleted) {
+        await session.call("wordpress_delete_content", { id: deletedPostId, force: true, confirm: true });
+      }
+    }
   });
 
   it("records empty-sizes behavior for a 1x1 PNG", async () => {

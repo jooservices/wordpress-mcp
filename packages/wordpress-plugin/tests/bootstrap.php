@@ -195,7 +195,13 @@ if (! function_exists('get_option')) {
 
     function get_option(string $name, mixed $default = false): mixed
     {
-        return $GLOBALS['wp_test_options'][$name] ?? $default;
+        $value = $GLOBALS['wp_test_options'][$name] ?? $default;
+
+        if (isset($GLOBALS['wp_test_get_option_hook'])) {
+            ($GLOBALS['wp_test_get_option_hook'])($name, $value);
+        }
+
+        return $value;
     }
 
     function update_option(string $name, mixed $value): bool
@@ -203,6 +209,31 @@ if (! function_exists('get_option')) {
         $GLOBALS['wp_test_options'][$name] = $value;
         $GLOBALS['wp_test_option_updates'][] = [$name, $value];
 
+        return true;
+    }
+
+    function add_option(string $name, mixed $value = '', string $deprecated = '', mixed $autoload = 'yes'): bool
+    {
+        if (array_key_exists($name, $GLOBALS['wp_test_options'])) {
+            return false;
+        }
+
+        $GLOBALS['wp_test_options'][$name] = $value;
+
+        return true;
+    }
+
+    function delete_option(string $name): bool
+    {
+        unset($GLOBALS['wp_test_options'][$name]);
+
+        return true;
+    }
+}
+
+if (! function_exists('wp_cache_delete')) {
+    function wp_cache_delete(mixed $key, string $group = ''): bool
+    {
         return true;
     }
 }
@@ -681,6 +712,59 @@ if (! function_exists('is_wp_error')) {
     }
 }
 
+if (! function_exists('wp_tempnam')) {
+    function wp_tempnam(string $filename = ''): string
+    {
+        return (string) tempnam(sys_get_temp_dir(), 'wpmcp');
+    }
+}
+
+if (! function_exists('wp_delete_file')) {
+    function wp_delete_file(string $file): void
+    {
+        if (is_file($file)) {
+            unlink($file);
+        }
+    }
+}
+
+if (! function_exists('media_handle_sideload')) {
+    /** Sideload always fails in unit tests; records the call so tests can see it ran. */
+    function media_handle_sideload(array $file, int $postId = 0): WP_Error|int
+    {
+        $GLOBALS['wp_test_sideload_calls'] = ($GLOBALS['wp_test_sideload_calls'] ?? 0) + 1;
+
+        if (isset($GLOBALS['wp_test_sideload_hook'])) {
+            ($GLOBALS['wp_test_sideload_hook'])();
+        }
+
+        if ($GLOBALS['wp_test_sideload_creates'] ?? false) {
+            $uploadDir = wp_upload_dir();
+            $target = $uploadDir['basedir'] . '/' . uniqid('sideload-') . '-' . $file['name'];
+
+            if (! is_dir(dirname($target))) {
+                mkdir(dirname($target), 0777, true);
+            }
+
+            copy((string) $file['tmp_name'], $target);
+
+            return wp_insert_attachment(['post_mime_type' => (string) $file['type'], 'post_title' => (string) $file['name']], $target);
+        }
+
+        return new WP_Error('sideload_failed', 'stub');
+    }
+}
+
+if (! function_exists('wp_delete_attachment')) {
+    function wp_delete_attachment(int $attachmentId, bool $force = false): mixed
+    {
+        $GLOBALS['wp_test_deleted_attachments'][] = $attachmentId;
+        unset($GLOBALS['wp_test_posts'][$attachmentId], $GLOBALS['wp_test_postmeta'][$attachmentId]);
+
+        return true;
+    }
+}
+
 if (! class_exists('WP_Error')) {
     class WP_Error
     {
@@ -901,6 +985,26 @@ if (! function_exists('wp_delete_term')) {
     }
 }
 
+if (! function_exists('set_post_thumbnail')) {
+    function set_post_thumbnail(int $postId, int $thumbnailId): bool
+    {
+        if ($GLOBALS['wp_test_set_thumbnail_fails'] ?? false) {
+            return false;
+        }
+
+        $GLOBALS['wp_test_thumbnails'][$postId] = $thumbnailId;
+
+        return true;
+    }
+}
+
+if (! function_exists('wp_attachment_is_image')) {
+    function wp_attachment_is_image(int $attachmentId): bool
+    {
+        return str_starts_with((string) get_post_mime_type($attachmentId), 'image/');
+    }
+}
+
 if (! function_exists('get_post_thumbnail_id')) {
     function get_post_thumbnail_id(int|\WP_Post $post): int
     {
@@ -1003,6 +1107,10 @@ if (! function_exists('wp_generate_attachment_metadata')) {
      */
     function wp_generate_attachment_metadata(int $attachmentId, string $file): array
     {
+        if (isset($GLOBALS['wp_test_metadata_hook'])) {
+            ($GLOBALS['wp_test_metadata_hook'])($attachmentId);
+        }
+
         $thresholdEnabled = apply_filters('big_image_size_threshold', 2560) !== false;
         $renameTo = $thresholdEnabled ? ($GLOBALS['wp_test_scale_rename'][$file] ?? null) : null;
 
@@ -1044,6 +1152,8 @@ if (! class_exists('wpdb')) {
         public string $posts = 'wp_posts';
 
         public string $postmeta = 'wp_postmeta';
+
+        public string $options = 'wp_options';
 
         public string $terms = 'wp_terms';
 
@@ -1119,6 +1229,38 @@ if (! class_exists('wpdb')) {
         public function query(string $query): int|false
         {
             $this->queries[] = $query;
+
+            $lockUpdatePattern = "/^UPDATE wp_options SET option_value = '([^']*)' "
+                . "WHERE option_name = '([^']*)' AND option_value = '([^']*)'$/";
+
+            if (preg_match($lockUpdatePattern, $query, $lockMatch)) {
+                [, $newValue, $name, $expectedValue] = $lockMatch;
+
+                if (($GLOBALS['wp_test_options'][$name] ?? null) !== $expectedValue) {
+                    return 0;
+                }
+
+                // MySQL reports changed rows only: rewriting an identical value affects 0.
+                if ($newValue === $expectedValue) {
+                    return 0;
+                }
+
+                $GLOBALS['wp_test_options'][$name] = $newValue;
+
+                return 1;
+            }
+
+            $lockDeletePattern = "/^DELETE FROM wp_options WHERE option_name = '([^']*)' AND option_value = '([^']*)'$/";
+
+            if (preg_match($lockDeletePattern, $query, $deleteMatch)) {
+                if (($GLOBALS['wp_test_options'][$deleteMatch[1]] ?? null) !== $deleteMatch[2]) {
+                    return 0;
+                }
+
+                unset($GLOBALS['wp_test_options'][$deleteMatch[1]]);
+
+                return 1;
+            }
 
             if ($query === 'START TRANSACTION') {
                 $GLOBALS['wp_test_transaction_snapshot'] = unserialize(serialize([

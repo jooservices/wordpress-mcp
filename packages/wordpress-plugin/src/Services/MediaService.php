@@ -22,6 +22,16 @@ final class MediaService
      */
     private const SOURCE_PATH_META_KEY = '_jooservices_orphan_source_path';
 
+    /** Upload idempotency key: sha256 of the uploaded bytes + target post ID. */
+    private const UPLOAD_SHA256_META_KEY = '_mcp_media_upload_sha256';
+
+    private const UPLOAD_POST_META_KEY = '_mcp_media_upload_post_id';
+
+    /** Option-row lock reserving an upload key while it is being stored. */
+    private const UPLOAD_LOCK_OPTION_PREFIX = 'jooservices_mcp_upload_lock_';
+
+    private const UPLOAD_LOCK_TTL_SECONDS = 300;
+
     /** @var list<string> */
     private const BLOCKED_EXTENSIONS = [
         'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
@@ -139,9 +149,71 @@ final class MediaService
             return $this->uploadFailure(ErrorCodes::INVALID_ARGUMENT, 'pre_validate.extension');
         }
 
+        $targetPostId = max(0, (int) ($data['post_id'] ?? 0));
+
+        // A missing post is normalized to zero and remains part of the key,
+        // so retries without a target post also resolve to the same attachment.
+        $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
+
+        if ($existingId !== null) {
+            return $this->replayUpload($existingId, $data, $preCheck['sha256']);
+        }
+
+        // Lookup + sideload are not atomic on their own: reserve the key first
+        // so an overlapping retry cannot also miss it and create a duplicate.
+        $lockName = self::UPLOAD_LOCK_OPTION_PREFIX . substr(hash('sha256', $preCheck['sha256'] . ':' . $targetPostId), 0, 40);
+
+        $lockToken = $this->acquireUploadLock($lockName);
+
+        if ($lockToken === null) {
+            $waitMs = max(0, (int) apply_filters('jooservices_mcp_upload_lock_wait_ms', 3000));
+            $existingId = $this->waitForUploadKey($preCheck['sha256'], $targetPostId, $waitMs);
+
+            if ($existingId !== null) {
+                return $this->replayUpload($existingId, $data, $preCheck['sha256']);
+            }
+
+            return $this->uploadFailure(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, 'upload.in_progress');
+        }
+
+        try {
+            // Re-check under the lock: a concurrent request may have finished
+            // between the first lookup and acquiring the lock.
+            $existingId = $this->findAttachmentByUploadKey($preCheck['sha256'], $targetPostId);
+
+            if ($existingId !== null) {
+                return $this->replayUpload($existingId, $data, $preCheck['sha256']);
+            }
+
+            return $this->storeUpload($data, $naming, $preCheck, $content, $fileName, $targetPostId, $lockName, $lockToken);
+        } finally {
+            $this->releaseUploadLock($lockName, $lockToken);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $naming
+     * @param array<string, mixed> $preCheck
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function storeUpload(
+        array $data,
+        array $naming,
+        array $preCheck,
+        string $content,
+        string $fileName,
+        int $targetPostId,
+        string $lockName,
+        string $lockToken,
+    ): array {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, null);
+        }
 
         $attachmentId = $this->sideloadAttachment($fileName, $preCheck['mime'], $content);
 
@@ -149,8 +221,18 @@ final class MediaService
             return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.sideload');
         }
 
+        // Sideloading may outlast the lease; a request that lost the lock must
+        // not go on to commit a second attachment for the same key.
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, $attachmentId);
+        }
+
         $metadata = wp_generate_attachment_metadata($attachmentId, (string) get_attached_file($attachmentId));
         wp_update_attachment_metadata($attachmentId, $metadata);
+
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, $attachmentId);
+        }
 
         $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
 
@@ -177,21 +259,15 @@ final class MediaService
             );
         }
 
-        $verification = $stored['verification'];
-        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
-
-        if ($featuredSet['error'] !== null) {
-            $this->cleanupAttachment($attachmentId);
-
-            return $this->uploadFailure(
-                $featuredSet['error'],
-                $featuredSet['step'] ?? 'featured.set_failed',
-                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
-            );
+        // Last fence before the idempotency key is committed.
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, $attachmentId);
         }
 
-        $verification['featured_set'] = $featuredSet['set'];
-        $verification['passed'] = true;
+        update_post_meta($attachmentId, self::UPLOAD_SHA256_META_KEY, $preCheck['sha256']);
+        update_post_meta($attachmentId, self::UPLOAD_POST_META_KEY, (string) $targetPostId);
+
+        $verification = $this->applyFeaturedResult($attachmentId, $data, $stored['verification']);
         MediaStoredVerifier::markVerified($attachmentId);
 
         $media = $this->normalize($attachmentId);
@@ -205,6 +281,30 @@ final class MediaService
             'error' => null,
             'error_step' => null,
         ];
+    }
+
+    /**
+     * This request lost its upload lock (lease expired and a retry took over).
+     * Discards its own uncommitted attachment, then returns the attachment the
+     * winning retry stored, so the key never ends up with two attachments.
+     *
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function reconcileLostLock(array $data, string $sha256, int $postId, ?int $ownAttachmentId): array
+    {
+        if ($ownAttachmentId !== null) {
+            $this->cleanupAttachment($ownAttachmentId);
+        }
+
+        $waitMs = max(0, (int) apply_filters('jooservices_mcp_upload_lock_wait_ms', 3000));
+        $existingId = $this->waitForUploadKey($sha256, $postId, $waitMs);
+
+        if ($existingId !== null) {
+            return $this->replayUpload($existingId, $data, $sha256);
+        }
+
+        return $this->uploadFailure(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, 'upload.in_progress');
     }
 
     /**
@@ -399,22 +499,7 @@ final class MediaService
             $verification['metadata_mismatch'] = $metadataCheck['verification']['metadata_mismatch'] ?? null;
         }
 
-        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
-
-        if ($featuredSet['error'] !== null) {
-            if ($isNewAdoption) {
-                $this->detachFailedAdoption($attachmentId);
-            }
-
-            return $this->uploadFailure(
-                $featuredSet['error'],
-                $featuredSet['step'] ?? 'featured.set_failed',
-                array_merge($verification, ['failed_step' => $featuredSet['step'] ?? 'featured.set_failed']),
-            );
-        }
-
-        $verification['featured_set'] = $featuredSet['set'];
-        $verification['passed'] = true;
+        $verification = $this->applyFeaturedResult($attachmentId, $data, $verification);
         MediaStoredVerifier::markVerified($attachmentId);
         (new MediaOrphanScanner())->forgetOrphanFile($relativePath);
 
@@ -682,6 +767,234 @@ final class MediaService
         }
 
         return ['set' => true, 'error' => null, 'step' => null];
+    }
+
+    /**
+     * Setting the featured image is a follow-up step: a failure keeps the
+     * stored media and is reported in the verification instead of deleting it.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $verification
+     * @return array<string, mixed>
+     */
+    private function applyFeaturedResult(int $attachmentId, array $data, array $verification): array
+    {
+        $featuredSet = $this->maybeSetFeaturedImage($attachmentId, $data);
+
+        $verification['featured_set'] = $featuredSet['set'];
+        $verification['featured_error'] = $featuredSet['error'];
+        $verification['featured_step'] = $featuredSet['step'];
+        $verification['passed'] = true;
+        $verification['failed_step'] = null;
+
+        return $verification;
+    }
+
+    /**
+     * Retry of an upload that already stored this exact file for this post:
+     * returns the existing attachment instead of creating a duplicate, and
+     * re-applies the featured image the first attempt may not have reached.
+     *
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function replayUpload(int $attachmentId, array $data, string $sourceSha256): array
+    {
+        $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $sourceSha256);
+
+        if ($stored['step'] !== null) {
+            return $this->uploadFailure(ErrorCodes::MEDIA_VERIFY_FAILED, $stored['step'], $stored['verification']);
+        }
+
+        $verification = $this->applyFeaturedResult($attachmentId, $data, $stored['verification']);
+        MediaStoredVerifier::markVerified($attachmentId);
+
+        $media = $this->normalize($attachmentId);
+        $media['verification'] = $verification;
+        $media['idempotent_replay'] = true;
+
+        return [
+            'media' => $media,
+            'verification' => $verification,
+            'error' => null,
+            'error_step' => null,
+        ];
+    }
+
+    /**
+     * Atomic reservation: `add_option()` fails when the option row already
+     * exists (unique option_name), so only one request holds a given key. The
+     * value is `<owner token>|<lease expiry>`; the holder renews the lease at
+     * each slow step, so a lease only expires when its request crashed or
+     * stalled, and only then may another request take it over. Returns the
+     * owner token, or null when the key is held.
+     */
+    private function acquireUploadLock(string $lockName): ?string
+    {
+        $token = bin2hex(random_bytes(16));
+
+        if ($this->reserveUploadLock($lockName, $token)) {
+            return $token;
+        }
+
+        $staleValue = (string) get_option($lockName, '');
+
+        if (time() < $this->lockExpiry($staleValue)) {
+            return null;
+        }
+
+        return $this->claimStaleUploadLock($lockName, $staleValue, $token) ? $token : null;
+    }
+
+    /** @phpstan-impure */
+    private function reserveUploadLock(string $lockName, string $token): bool
+    {
+        return add_option($lockName, $this->lockValue($token), '', false);
+    }
+
+    /**
+     * Replaces an expired option only if it still contains the value this
+     * request observed. This compare-and-swap prevents concurrent retries
+     * from deleting a lock another retry has already claimed.
+     */
+    private function claimStaleUploadLock(string $lockName, string $staleValue, string $token): bool
+    {
+        global $wpdb;
+
+        $claimed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+            $this->lockValue($token),
+            $lockName,
+            $staleValue,
+        ));
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+
+        return $claimed === 1;
+    }
+
+    /**
+     * Extends the lease with a compare-and-swap on the value this request
+     * last wrote, so a takeover is never overwritten. Returns false once this
+     * request no longer owns the lock.
+     */
+    /** @phpstan-impure */
+    private function renewUploadLock(string $lockName, string $token): bool
+    {
+        global $wpdb;
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+
+        $current = (string) get_option($lockName, '');
+
+        if ($this->lockOwner($current) !== $token) {
+            return false;
+        }
+
+        $renewed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+            $this->lockValue($token),
+            $lockName,
+            $current,
+        ));
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+
+        return $renewed === 1;
+    }
+
+    /** Releases the lock only when this request still owns it (atomic). */
+    private function releaseUploadLock(string $lockName, string $token): void
+    {
+        global $wpdb;
+
+        $current = (string) get_option($lockName, '');
+
+        if ($this->lockOwner($current) !== $token) {
+            return;
+        }
+
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s",
+            $lockName,
+            $current,
+        ));
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+    }
+
+    private function lockValue(string $token): string
+    {
+        // The nonce makes every write distinct: MySQL reports 0 affected rows
+        // for an identical value, which a same-second renewal would produce.
+        return $token . '|' . (time() + $this->lockTtlSeconds()) . '|' . bin2hex(random_bytes(4));
+    }
+
+    /** The lease must outlast PHP's own execution limit; renewals extend it further. */
+    private function lockTtlSeconds(): int
+    {
+        $limit = (int) ini_get('max_execution_time');
+
+        return max(self::UPLOAD_LOCK_TTL_SECONDS, $limit > 0 ? $limit + 60 : 0);
+    }
+
+    private function lockOwner(string $value): string
+    {
+        return str_contains($value, '|') ? explode('|', $value)[0] : '';
+    }
+
+    /** Legacy bare-timestamp values count as acquired-at plus the TTL. */
+    private function lockExpiry(string $value): int
+    {
+        if (str_contains($value, '|')) {
+            return (int) explode('|', $value)[1];
+        }
+
+        return (int) $value > 0 ? (int) $value + $this->lockTtlSeconds() : 0;
+    }
+
+    private function waitForUploadKey(string $sha256, int $postId, int $waitMs): ?int
+    {
+        $deadline = microtime(true) + $waitMs / 1000;
+
+        do {
+            $existingId = $this->findAttachmentByUploadKey($sha256, $postId);
+
+            if ($existingId !== null) {
+                return $existingId;
+            }
+
+            if ($waitMs <= 0) {
+                break;
+            }
+
+            usleep(250_000);
+        } while (microtime(true) < $deadline);
+
+        return null;
+    }
+
+    private function findAttachmentByUploadKey(string $sha256, int $postId): ?int
+    {
+        $query = new WP_Query([
+            'post_type' => 'attachment',
+            'post_status' => 'inherit',
+            'posts_per_page' => 1,
+            'orderby' => 'ID',
+            'order' => 'ASC',
+            'meta_query' => [
+                ['key' => self::UPLOAD_SHA256_META_KEY, 'value' => $sha256],
+                ['key' => self::UPLOAD_POST_META_KEY, 'value' => (string) $postId],
+            ],
+        ]);
+
+        $post = $query->posts[0] ?? null;
+
+        return $post instanceof \WP_Post ? (int) $post->ID : null;
     }
 
     private function cleanupAttachment(int $attachmentId): void
