@@ -211,17 +211,28 @@ final class MediaService
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
-        $this->renewUploadLock($lockName, $lockToken);
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, null);
+        }
+
         $attachmentId = $this->sideloadAttachment($fileName, $preCheck['mime'], $content);
 
         if ($attachmentId === null) {
             return $this->uploadFailure(ErrorCodes::WORDPRESS_ERROR, 'upload.sideload');
         }
 
-        $this->renewUploadLock($lockName, $lockToken);
+        // Sideloading may outlast the lease; a request that lost the lock must
+        // not go on to commit a second attachment for the same key.
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, $attachmentId);
+        }
+
         $metadata = wp_generate_attachment_metadata($attachmentId, (string) get_attached_file($attachmentId));
         wp_update_attachment_metadata($attachmentId, $metadata);
-        $this->renewUploadLock($lockName, $lockToken);
+
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, $attachmentId);
+        }
 
         $stored = MediaStoredVerifier::verifyAttachment($attachmentId, $preCheck['sha256']);
 
@@ -248,6 +259,11 @@ final class MediaService
             );
         }
 
+        // Last fence before the idempotency key is committed.
+        if (! $this->renewUploadLock($lockName, $lockToken)) {
+            return $this->reconcileLostLock($data, $preCheck['sha256'], $targetPostId, $attachmentId);
+        }
+
         update_post_meta($attachmentId, self::UPLOAD_SHA256_META_KEY, $preCheck['sha256']);
         update_post_meta($attachmentId, self::UPLOAD_POST_META_KEY, (string) $targetPostId);
 
@@ -265,6 +281,30 @@ final class MediaService
             'error' => null,
             'error_step' => null,
         ];
+    }
+
+    /**
+     * This request lost its upload lock (lease expired and a retry took over).
+     * Discards its own uncommitted attachment, then returns the attachment the
+     * winning retry stored, so the key never ends up with two attachments.
+     *
+     * @param array<string, mixed> $data
+     * @return array{media: array<string, mixed>|null, verification: array<string, mixed>|null, error: string|null, error_step: string|null}
+     */
+    private function reconcileLostLock(array $data, string $sha256, int $postId, ?int $ownAttachmentId): array
+    {
+        if ($ownAttachmentId !== null) {
+            $this->cleanupAttachment($ownAttachmentId);
+        }
+
+        $waitMs = max(0, (int) apply_filters('jooservices_mcp_upload_lock_wait_ms', 3000));
+        $existingId = $this->waitForUploadKey($sha256, $postId, $waitMs);
+
+        if ($existingId !== null) {
+            return $this->replayUpload($existingId, $data, $sha256);
+        }
+
+        return $this->uploadFailure(ErrorCodes::MEDIA_UPLOAD_IN_PROGRESS, 'upload.in_progress');
     }
 
     /**
@@ -834,29 +874,70 @@ final class MediaService
         return $claimed === 1;
     }
 
-    /** Extends the lease, but only while this request still owns the lock. */
-    private function renewUploadLock(string $lockName, string $token): void
+    /**
+     * Extends the lease with a compare-and-swap on the value this request
+     * last wrote, so a takeover is never overwritten. Returns false once this
+     * request no longer owns the lock.
+     */
+    /** @phpstan-impure */
+    private function renewUploadLock(string $lockName, string $token): bool
     {
-        if ($lockName === '') {
+        global $wpdb;
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+
+        $current = (string) get_option($lockName, '');
+
+        if ($this->lockOwner($current) !== $token) {
+            return false;
+        }
+
+        $renewed = $wpdb->query($wpdb->prepare(
+            "UPDATE {$wpdb->options} SET option_value = %s WHERE option_name = %s AND option_value = %s",
+            $this->lockValue($token),
+            $lockName,
+            $current,
+        ));
+
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
+
+        return $renewed === 1;
+    }
+
+    /** Releases the lock only when this request still owns it (atomic). */
+    private function releaseUploadLock(string $lockName, string $token): void
+    {
+        global $wpdb;
+
+        $current = (string) get_option($lockName, '');
+
+        if ($this->lockOwner($current) !== $token) {
             return;
         }
 
-        if ($this->lockOwner((string) get_option($lockName, '')) === $token) {
-            update_option($lockName, $this->lockValue($token));
-        }
-    }
+        $wpdb->query($wpdb->prepare(
+            "DELETE FROM {$wpdb->options} WHERE option_name = %s AND option_value = %s",
+            $lockName,
+            $current,
+        ));
 
-    /** Releases the lock only when this request still owns it. */
-    private function releaseUploadLock(string $lockName, string $token): void
-    {
-        if ($this->lockOwner((string) get_option($lockName, '')) === $token) {
-            delete_option($lockName);
-        }
+        wp_cache_delete($lockName, 'options');
+        wp_cache_delete('alloptions', 'options');
     }
 
     private function lockValue(string $token): string
     {
-        return $token . '|' . (time() + self::UPLOAD_LOCK_TTL_SECONDS);
+        return $token . '|' . (time() + $this->lockTtlSeconds());
+    }
+
+    /** The lease must outlast PHP's own execution limit; renewals extend it further. */
+    private function lockTtlSeconds(): int
+    {
+        $limit = (int) ini_get('max_execution_time');
+
+        return max(self::UPLOAD_LOCK_TTL_SECONDS, $limit > 0 ? $limit + 60 : 0);
     }
 
     private function lockOwner(string $value): string
@@ -871,7 +952,7 @@ final class MediaService
             return (int) explode('|', $value, 2)[1];
         }
 
-        return (int) $value > 0 ? (int) $value + self::UPLOAD_LOCK_TTL_SECONDS : 0;
+        return (int) $value > 0 ? (int) $value + $this->lockTtlSeconds() : 0;
     }
 
     private function waitForUploadKey(string $sha256, int $postId, int $waitMs): ?int

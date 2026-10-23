@@ -340,6 +340,83 @@ final class MediaServiceTest extends TestCase
     }
 
     #[Test]
+    public function a_request_that_loses_its_lock_during_slow_metadata_generation_defers_to_the_retry(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $sha = hash('sha256', $png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        add_filter('jooservices_mcp_upload_lock_wait_ms', static fn(): int => 0);
+
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', $sha . ':70'), 0, 40);
+        $winnerPath = sys_get_temp_dir() . '/jooservices-mcp-test-uploads/winner-' . uniqid() . '.png';
+        $this->writeMinimalPng($winnerPath);
+        $winnerId = 9500;
+        $foreign = 'retry-owner|' . (time() + 300);
+
+        $GLOBALS['wp_test_posts'] = [70 => new \WP_Post(70, '', 'post')];
+        $GLOBALS['wp_test_deleted_attachments'] = [];
+        $GLOBALS['wp_test_sideload_creates'] = true;
+        // While metadata generation runs past the lease, a retry takes the lock
+        // over and stores the attachment for the same key.
+        $GLOBALS['wp_test_metadata_hook'] = static function () use ($lockName, $foreign, $winnerId, $winnerPath, $sha): void {
+            $GLOBALS['wp_test_options'][$lockName] = $foreign;
+            $winner = new \WP_Post($winnerId, '', 'attachment');
+            $winner->post_status = 'inherit';
+            $GLOBALS['wp_test_posts'][$winnerId] = $winner;
+            $GLOBALS['wp_test_attachment_files'][$winnerId] = $winnerPath;
+            $GLOBALS['wp_test_attachment_urls'][$winnerId] = 'https://example.test/wp-content/uploads/winner.png';
+            $GLOBALS['wp_test_attachment_mimes'][$winnerId] = 'image/png';
+            $GLOBALS['wp_test_attachment_metadata'][$winnerId] = ['width' => 1, 'height' => 1, 'sizes' => []];
+            $GLOBALS['wp_test_postmeta'][$winnerId] = [
+                '_mcp_media_upload_sha256' => $sha,
+                '_mcp_media_upload_post_id' => '70',
+            ];
+        };
+
+        try {
+            $result = (new MediaService())->upload(['file_name' => 'slow.png', 'post_id' => 70, 'content_base64' => base64_encode($png)]);
+        } finally {
+            unset($GLOBALS['wp_test_metadata_hook'], $GLOBALS['wp_test_sideload_creates']);
+        }
+
+        self::assertNull($result['error']);
+        self::assertSame($winnerId, $result['media']['id']);
+        self::assertTrue($result['media']['idempotent_replay']);
+        self::assertCount(1, $GLOBALS['wp_test_deleted_attachments'], 'The stale request discards its own attachment.');
+        self::assertNotContains($winnerId, $GLOBALS['wp_test_deleted_attachments']);
+        $attachments = array_filter($GLOBALS['wp_test_posts'], static fn(mixed $p): bool => $p instanceof \WP_Post && $p->post_type === 'attachment');
+        self::assertCount(1, $attachments, 'Only the retry\'s attachment remains.');
+        self::assertSame($foreign, $GLOBALS['wp_test_options'][$lockName], 'The retry\'s lock is untouched.');
+
+        unlink($winnerPath);
+    }
+
+    #[Test]
+    public function it_sizes_the_lock_lease_to_outlast_the_php_execution_limit(): void
+    {
+        $png = base64_decode(self::MINIMAL_PNG_BASE64, true);
+        self::assertNotFalse($png);
+        $GLOBALS['wp_test_max_upload_size'] = 1_000_000;
+        $lockName = 'jooservices_mcp_upload_lock_' . substr(hash('sha256', hash('sha256', $png) . ':70'), 0, 40);
+        $seen = null;
+        $GLOBALS['wp_test_sideload_hook'] = static function () use ($lockName, &$seen): void {
+            $seen = (int) explode('|', (string) $GLOBALS['wp_test_options'][$lockName], 2)[1];
+        };
+        $previous = ini_set('max_execution_time', '900');
+
+        try {
+            (new MediaService())->upload(['file_name' => 'lease.png', 'post_id' => 70, 'content_base64' => base64_encode($png)]);
+        } finally {
+            unset($GLOBALS['wp_test_sideload_hook']);
+            ini_set('max_execution_time', (string) $previous);
+        }
+
+        self::assertNotNull($seen);
+        self::assertGreaterThanOrEqual(time() + 900, $seen);
+    }
+
+    #[Test]
     public function it_keeps_the_media_and_reports_when_setting_the_featured_image_fails(): void
     {
         $basedir = sys_get_temp_dir() . '/jooservices-mcp-test-uploads';

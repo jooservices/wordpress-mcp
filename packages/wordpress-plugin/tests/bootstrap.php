@@ -730,7 +730,7 @@ if (! function_exists('wp_delete_file')) {
 
 if (! function_exists('media_handle_sideload')) {
     /** Sideload always fails in unit tests; records the call so tests can see it ran. */
-    function media_handle_sideload(array $file, int $postId = 0): WP_Error
+    function media_handle_sideload(array $file, int $postId = 0): WP_Error|int
     {
         $GLOBALS['wp_test_sideload_calls'] = ($GLOBALS['wp_test_sideload_calls'] ?? 0) + 1;
 
@@ -738,7 +738,30 @@ if (! function_exists('media_handle_sideload')) {
             ($GLOBALS['wp_test_sideload_hook'])();
         }
 
+        if ($GLOBALS['wp_test_sideload_creates'] ?? false) {
+            $uploadDir = wp_upload_dir();
+            $target = $uploadDir['basedir'] . '/' . uniqid('sideload-') . '-' . $file['name'];
+
+            if (! is_dir(dirname($target))) {
+                mkdir(dirname($target), 0777, true);
+            }
+
+            copy((string) $file['tmp_name'], $target);
+
+            return wp_insert_attachment(['post_mime_type' => (string) $file['type'], 'post_title' => (string) $file['name']], $target);
+        }
+
         return new WP_Error('sideload_failed', 'stub');
+    }
+}
+
+if (! function_exists('wp_delete_attachment')) {
+    function wp_delete_attachment(int $attachmentId, bool $force = false): mixed
+    {
+        $GLOBALS['wp_test_deleted_attachments'][] = $attachmentId;
+        unset($GLOBALS['wp_test_posts'][$attachmentId], $GLOBALS['wp_test_postmeta'][$attachmentId]);
+
+        return true;
     }
 }
 
@@ -1084,6 +1107,10 @@ if (! function_exists('wp_generate_attachment_metadata')) {
      */
     function wp_generate_attachment_metadata(int $attachmentId, string $file): array
     {
+        if (isset($GLOBALS['wp_test_metadata_hook'])) {
+            ($GLOBALS['wp_test_metadata_hook'])($attachmentId);
+        }
+
         $thresholdEnabled = apply_filters('big_image_size_threshold', 2560) !== false;
         $renameTo = $thresholdEnabled ? ($GLOBALS['wp_test_scale_rename'][$file] ?? null) : null;
 
@@ -1214,6 +1241,18 @@ if (! class_exists('wpdb')) {
                 }
 
                 $GLOBALS['wp_test_options'][$name] = $newValue;
+
+                return 1;
+            }
+
+            $lockDeletePattern = "/^DELETE FROM wp_options WHERE option_name = '([^']*)' AND option_value = '([^']*)'$/";
+
+            if (preg_match($lockDeletePattern, $query, $deleteMatch)) {
+                if (($GLOBALS['wp_test_options'][$deleteMatch[1]] ?? null) !== $deleteMatch[2]) {
+                    return 0;
+                }
+
+                unset($GLOBALS['wp_test_options'][$deleteMatch[1]]);
 
                 return 1;
             }
