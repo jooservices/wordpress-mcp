@@ -374,7 +374,9 @@ function renderConsentPage(
   params: AuthorizationParams,
   error?: string,
 ): string {
-  const clientName = escapeHtml(client.client_name || client.client_id);
+  const clientName = escapeHtml(client.client_name || "(no name supplied)");
+  const clientId = escapeHtml(client.client_id);
+  const redirectUri = escapeHtml(String(params.redirectUri));
   const scopes = escapeHtml((params.scopes?.length ? params.scopes : resolveScopes(undefined)).join(", "));
   const escapedId = escapeHtml(approvalId);
   const errorMarkup = error ? `<p role="alert">${escapeHtml(error)}</p>` : "";
@@ -382,7 +384,12 @@ function renderConsentPage(
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Approve MCP access</title></head>
 <body><main><h1>Approve MCP access</h1>${errorMarkup}
-<p><strong>${clientName}</strong> requests access to your WordPress site.</p>
+<p>An application requests access to your WordPress site. Approve only if you recognize where it will be sent.</p>
+<dl>
+<dt>Redirect destination</dt><dd><strong><code>${redirectUri}</code></strong></dd>
+<dt>Client ID</dt><dd><strong><code>${clientId}</code></strong></dd>
+<dt>Client name (self-supplied, not verified)</dt><dd>${clientName}</dd>
+</dl>
 <p>Requested permissions: ${scopes}</p>
 <form method="post" action="/oauth/consent">
 <input type="hidden" name="approval_id" value="${escapedId}">

@@ -172,6 +172,9 @@ describe("OAuth HTTP endpoints", () => {
       const consentPage = await authorizeResponse.text();
       expect(consentPage).toContain("Approve MCP access");
       expect(consentPage).toContain(`${OAUTH_SCOPES.READ}, ${OAUTH_SCOPES.WRITE}`);
+      expect(consentPage).toContain(`<code>${registeredRedirectUri}</code>`);
+      expect(consentPage).toContain(`<code>${client.client_id}</code>`);
+      expect(consentPage).toContain("self-supplied");
       const approvalId = consentPage.match(/name="approval_id" value="([^"]+)"/)?.[1];
       expect(approvalId).toBeTruthy();
 
