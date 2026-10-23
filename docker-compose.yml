@@ -111,6 +111,7 @@ services:
       WORDPRESS_CONNECTION_TOKEN: ${WORDPRESS_CONNECTION_TOKEN:-dev-wp-token-local-only}
       MCP_URL: http://mcp:3000
       MCP_AUTH_SECRET: ${MCP_AUTH_SECRET:-dev-mcp-secret-local-only}
+      MCP_AUTH_MODE: ${MCP_AUTH_MODE:-static}
     command: sh -c "npm install --global npm@12.2.0 && npm ci && npm test -- tests/integration.test.ts"
     depends_on:
       mcp:
