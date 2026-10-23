@@ -1240,6 +1240,11 @@ if (! class_exists('wpdb')) {
                     return 0;
                 }
 
+                // MySQL reports changed rows only: rewriting an identical value affects 0.
+                if ($newValue === $expectedValue) {
+                    return 0;
+                }
+
                 $GLOBALS['wp_test_options'][$name] = $newValue;
 
                 return 1;

@@ -929,7 +929,9 @@ final class MediaService
 
     private function lockValue(string $token): string
     {
-        return $token . '|' . (time() + $this->lockTtlSeconds());
+        // The nonce makes every write distinct: MySQL reports 0 affected rows
+        // for an identical value, which a same-second renewal would produce.
+        return $token . '|' . (time() + $this->lockTtlSeconds()) . '|' . bin2hex(random_bytes(4));
     }
 
     /** The lease must outlast PHP's own execution limit; renewals extend it further. */
@@ -942,14 +944,14 @@ final class MediaService
 
     private function lockOwner(string $value): string
     {
-        return str_contains($value, '|') ? explode('|', $value, 2)[0] : '';
+        return str_contains($value, '|') ? explode('|', $value)[0] : '';
     }
 
     /** Legacy bare-timestamp values count as acquired-at plus the TTL. */
     private function lockExpiry(string $value): int
     {
         if (str_contains($value, '|')) {
-            return (int) explode('|', $value, 2)[1];
+            return (int) explode('|', $value)[1];
         }
 
         return (int) $value > 0 ? (int) $value + $this->lockTtlSeconds() : 0;
