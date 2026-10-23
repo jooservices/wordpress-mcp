@@ -1051,9 +1051,20 @@ describe("wordpress_upload_media partial success", () => {
     expect(result.isError).toBeFalsy();
     expect(text).toContain('Uploaded verified media #55 on site "abc".');
     expect(text).toContain("Partial success:");
-    expect(text).toContain("already uploaded for this post");
+    expect(text).toContain("already uploaded for the same target");
     expect(text).toContain("featured image was NOT set (featured.set_failed)");
     expect(text).toContain("public URL check was inconclusive (timeout)");
+  });
+
+  it("reports a replay-only retry as a success, not a partial success", async () => {
+    uploadResponse = { id: 57, idempotent_replay: true, verification: { passed: true } };
+
+    const result = await ctx.client.callTool({ name: "wordpress_upload_media", arguments: uploadArgs });
+
+    const text = (result.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain('Uploaded verified media #57 on site "abc".');
+    expect(text).toContain("already uploaded for the same target");
+    expect(text).not.toContain("Partial success");
   });
 
   it("returns the plain message when there is nothing to warn about", async () => {

@@ -1447,9 +1447,10 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const verification = item.verification;
       const passed = verification?.passed === true;
       const warnings: string[] = [];
-      if (item.idempotent_replay === true) {
-        warnings.push("this file was already uploaded for the same target, so the existing attachment was returned (no duplicate created)");
-      }
+      const replayNote =
+        item.idempotent_replay === true
+          ? "This file was already uploaded for the same target, so the existing attachment was returned (no duplicate created)."
+          : "";
       if (verification?.featured_error) {
         warnings.push(`the media was stored but the featured image was NOT set (${verification.featured_step ?? verification.featured_error}); set it with wordpress_update_content instead of re-uploading`);
       }
@@ -1459,11 +1460,18 @@ export function createMcpServer(registry: SiteRegistry, options: McpServerOption
       const base = passed
         ? `Uploaded verified media #${item.id} on site "${siteId}".`
         : `Uploaded media #${item.id} on site "${siteId}", but verification did not pass.`;
+      const parts = [base];
+      if (replayNote) {
+        parts.push(replayNote);
+      }
+      if (warnings.length > 0) {
+        parts.push(`Partial success: ${warnings.join("; ")}.`);
+      }
       return {
         content: [
           {
             type: "text",
-            text: warnings.length > 0 ? `${base} Partial success: ${warnings.join("; ")}.` : base,
+            text: parts.join(" "),
           },
         ],
         structuredContent: withSiteMeta(siteId, item),
