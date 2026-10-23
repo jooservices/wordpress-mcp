@@ -1,7 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { fixtureBase64, McpSession, runE2EFull, textOf, uniquePngBase64 } from "./helpers.js";
 
-describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
+// Each test uploads real images (subsizes + loopback URL check) and often replays
+// or reads them back; vitest's 5 s default is too tight for a CI WordPress.
+describe.skipIf(!runE2EFull)("e2e media upload and verification", { timeout: 120_000 }, () => {
   const session = new McpSession();
   const stamp = Date.now();
   const createdIds: number[] = [];
