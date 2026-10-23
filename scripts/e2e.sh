@@ -60,7 +60,6 @@ export WP_INTERNAL_URL=http://wordpress
 export WORDPRESS_HOST_PORT="${WORDPRESS_HOST_PORT:-18080}"
 export MCP_HOST_PORT="${MCP_HOST_PORT:-3000}"
 # Seeded orphan cache must not be overwritten by an overdue WP-Cron scan mid-suite.
-export WORDPRESS_CONFIG_EXTRA="define('DISABLE_WP_CRON', true);"
 export DISABLE_WP_CRON=1
 export RUN_E2E=1
 if [ "$FULL" = "1" ]; then
