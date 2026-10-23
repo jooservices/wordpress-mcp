@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureBase64, McpSession, runE2EFull, textOf } from "./helpers.js";
+import { fixtureBase64, McpSession, runE2EFull, textOf, uniquePngBase64 } from "./helpers.js";
 
 describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
   const session = new McpSession();
@@ -25,7 +25,7 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     const args = {
       title: `E2E small ${stamp}`,
       image_type: "inline",
-      content_base64: fixtureBase64("e2e-small.png"),
+      content_base64: uniquePngBase64(),
       alt_text: `Small ${stamp}`,
     };
     const uploaded = await session.expectSuccess("wordpress_upload_media", args);
@@ -109,7 +109,7 @@ describe.skipIf(!runE2EFull)("e2e media upload and verification", () => {
     const args = {
       title: `E2E idempotent ${stamp}`,
       image_type: "inline",
-      content_base64: fixtureBase64("e2e-small.png"),
+      content_base64: uniquePngBase64(),
       post_id: postId,
       set_featured: true,
     };

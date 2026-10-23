@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { fixtureBase64, McpSession, runE2EFull } from "./helpers.js";
+import { McpSession, runE2EFull, uniquePngBase64 } from "./helpers.js";
 
 describe.skipIf(!runE2EFull)("e2e content + featured media", () => {
   const session = new McpSession();
@@ -52,7 +52,7 @@ describe.skipIf(!runE2EFull)("e2e content + featured media", () => {
     const uploaded = await session.expectSuccess("wordpress_upload_media", {
       title: `E2E featured ${stamp}`,
       image_type: "featured",
-      content_base64: fixtureBase64("e2e-small.png"),
+      content_base64: uniquePngBase64(),
       alt_text: `Featured ${stamp}`,
     });
     mediaId = Number(uploaded.structuredContent?.id);

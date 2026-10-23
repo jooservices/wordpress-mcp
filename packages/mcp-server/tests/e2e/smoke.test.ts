@@ -1,11 +1,11 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   EXPECTED_TOOLS,
-  fixtureBase64,
   isConfirmation,
   McpSession,
   runE2E,
   siteId,
+  uniquePngBase64,
 } from "./helpers.js";
 
 describe.skipIf(!runE2E)("e2e smoke: every MCP tool against live WordPress", () => {
@@ -154,7 +154,7 @@ describe.skipIf(!runE2E)("e2e smoke: every MCP tool against live WordPress", () 
     const uploaded = await session.expectSuccess("wordpress_upload_media", {
       title: `E2E media ${stamp}`,
       image_type: "inline",
-      content_base64: fixtureBase64("e2e-small.png"),
+      content_base64: uniquePngBase64(),
       alt_text: `Alt ${stamp}`,
     });
     const mediaId = Number(uploaded.structuredContent?.id);
