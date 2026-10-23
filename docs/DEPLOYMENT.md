@@ -142,7 +142,7 @@ Put HTTPS in front with Caddy or Nginx. Example: [docker/caddy/Caddyfile.prod](.
 | `MCP_OAUTH_CONSENT_WINDOW_MS` | No | Consent submission window in ms (default `900000` = 15 min) |
 | `MCP_OAUTH_REVOKE_MAX` | No | Max revoke requests per window (default `50`) |
 | `MCP_OAUTH_REVOKE_WINDOW_MS` | No | Revoke window in ms (default `900000` = 15 min) |
-| `MCP_TRUST_PROXY` | No | Default `1`. Trust `X-Forwarded-For` for OAuth rate limits behind reverse proxies |
+| `MCP_TRUST_PROXY` | No | Default disabled. Set a positive proxy hop count (for example, `1`) or a comma-separated list of proxy IP addresses/CIDRs (for example, `10.0.0.0/8,2001:db8::1/128`). Set `0`, `false`, or `no` to disable; blanket `true` is rejected. |
 | `MCP_DOMAIN` | No***** | Public hostname for `make prod-https` (Caddy/Let's Encrypt) |
 | `ACME_EMAIL` | No***** | Let's Encrypt contact email for `make prod-https` |
 | `NGROK_AUTHTOKEN` | No****** | ngrok token for `make prod-tunnel` only |
